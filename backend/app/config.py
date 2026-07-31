@@ -60,7 +60,11 @@ class Settings(BaseSettings):
     # while keeping the model's real reasoning/suggestedFixes text.
     fernwood_force_first_retry: bool = True
 
-    public_api_base: str = "http://127.0.0.1:8000"
+    # Port 8787, not 8000: :8000 is commonly occupied by other local services.
+    # Only used to build LocalDiskBackend durable URLs, which public_media_url()
+    # immediately rewrites to relative /api/media/... paths — so stored
+    # campaign.json files survive a port change.
+    public_api_base: str = "http://127.0.0.1:8787"
 
     @property
     def local_root(self) -> Path:

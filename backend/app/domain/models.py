@@ -126,9 +126,16 @@ class Asset(TSModel):
 
 
 class CampaignAssets(TSModel):
+    # `copy` shadows BaseModel.copy (deprecated in pydantic v2). The name is
+    # fixed by the TS contract in src/types.ts, so silence the warning rather
+    # than rename and diverge from the frontend.
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, protected_namespaces=()
+    )
+
     image: Asset | None = None
     audio: Asset | None = None
-    copy: Asset | None = None
+    copy: Asset | None = None  # type: ignore[assignment]
 
 
 class Campaign(TSModel):
