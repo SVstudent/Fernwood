@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# backend
+backend/.venv/
+backend/var/
+backend/__pycache__/
+**/__pycache__/
+*.pyc

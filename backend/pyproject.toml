@@ -1,0 +1,26 @@
+[project]
+name = "fernwood-backend"
+version = "0.1.0"
+description = "Fernwood campaign pipeline: Genblaze orchestration over TokenRouter + ElevenLabs, persisted to Backblaze B2."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115,<0.120",
+    "uvicorn[standard]>=0.32,<0.36",
+    "sse-starlette>=2.1,<3",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    "httpx>=0.27,<1",
+    "openai>=1.50,<3",
+    "python-dotenv>=1.0,<2",
+    "pillow>=10,<12",
+    # Genblaze: pinned exactly. The SDK is young (core 0.3.x) and signatures
+    # have moved between patch releases; an unpinned resolve mid-hackathon is
+    # a self-inflicted outage. uv.lock is committed alongside.
+    "genblaze-core>=0.3.8,<0.4",
+    "genblaze-openai>=0.3.4,<0.4",
+    "genblaze-elevenlabs>=0.3.3,<0.4",
+    "genblaze-s3>=0.3.6,<0.4",
+]
+
+[tool.uv]
+package = false
