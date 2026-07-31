@@ -17,6 +17,19 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Proxy API + SSE to the Python (Genblaze) backend. Port 8787 rather
+      // than 8000, which is commonly taken by other local services.
+      // timeout/proxyTimeout of 0 = no timeout: a campaign run holds the SSE
+      // connection open for minutes, and the default would sever it mid-run.
+      proxy: {
+        '/api': {
+          target: 'http://127.0.0.1:8787',
+          changeOrigin: true,
+          ws: false,
+          timeout: 0,
+          proxyTimeout: 0,
+        },
+      },
     },
   };
 });
