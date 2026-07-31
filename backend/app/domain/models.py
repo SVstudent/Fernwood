@@ -8,10 +8,20 @@ the TS type expects them absent, not null.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
+
+# CampaignAssets.copy shadows BaseModel.copy (deprecated in pydantic v2). The
+# field name is fixed by the TS contract in src/types.ts, so renaming would
+# diverge from the frontend. Suppress the cosmetic warning instead.
+warnings.filterwarnings(
+    "ignore",
+    message=r'Field name "copy" in "CampaignAssets" shadows an attribute',
+    category=UserWarning,
+)
 
 AssetType = Literal["image", "audio", "copy"]
 PipelineStageId = Literal[
