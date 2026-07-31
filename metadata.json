@@ -1,0 +1,6 @@
+{
+  "name": "Fernwood",
+  "description": "AI-powered brand campaign asset generator with a self-critique and retry pipeline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
