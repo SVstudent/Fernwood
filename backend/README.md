@@ -39,14 +39,32 @@ curl -s localhost:8787/api/health | python3 -m json.tool
 ## Tests
 
 ```bash
-uv run pytest              # 150 offline tests, no keys, no network (~65s)
-uv run pytest -m live      # 11 live tests against real TokenRouter/ElevenLabs/B2
+uv run pytest              # 190 offline tests — no keys, no network (~95s)
+uv run pytest -m live      # 46 live tests against real TokenRouter/ElevenLabs/B2 (~4min)
 ```
 
 Live tests are excluded by default (they cost money). They exist because the
 offline suite cannot catch upstream contract drift — the image size floor, the
 watermark default, which models return usable JSON, and whether the B2 key still
 works have each broken at least once.
+
+Three live files matter most:
+
+| File | What it proves |
+|---|---|
+| `test_live_demo_path.py` | 26 assertions over **one real campaign** driven through the HTTP API exactly as the browser does: varied non-canned critique scores, retry prompts carrying prior feedback, decodable image, Range-served MP3, and manifests downloaded from B2 that pass `Manifest.verify()` |
+| `test_live_audio_content.py` | The voiceover **actually says the script** — transcribed with an audio-capable model and compared word-for-word (100% overlap observed). Plus duration, speaking rate, and a size-vs-duration check that catches truncation |
+| `test_live_integration.py` | Per-service contracts: model availability, the image size floor, and that the vision model returns non-empty structured JSON |
+
+`test_live_demo_path.py` deletes its campaign afterwards so runs don't pollute
+the demo library. Set `FERNWOOD_KEEP_TEST_CAMPAIGNS=1` to keep it.
+
+### Why transcription rather than "is it a valid MP3"
+
+A well-formed MP3 can be silence, a truncated buffer, or the wrong take. Audible
+playback could not be confirmed in an automated browser — media elements never
+load there, and a synthesized WAV control stalls identically — so the audio is
+verified by transcribing it and diffing against the generated script instead.
 
 | Script | Needs keys? | What it proves |
 |---|---|---|

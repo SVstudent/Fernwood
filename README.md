@@ -68,9 +68,15 @@ it needs its own manifest rather than being overwritten.
 
 ```bash
 cd backend
-uv run pytest              # 150 offline tests — no keys, no network
-uv run pytest -m live      # 11 live tests against the real APIs
+uv run pytest              # 190 offline tests — no keys, no network
+uv run pytest -m live      # 46 live tests against the real APIs
 ```
+
+The live suite drives a complete campaign through the HTTP API exactly as the
+browser does, then asserts on what a judge would check: critique scores are real
+and varied (not canned), retry prompts carry the prior critique's feedback, the
+image decodes, the voiceover **transcribes back to the generated script**, and
+every manifest downloaded from B2 passes `Manifest.verify()`.
 
 See [backend/README.md](backend/README.md) for architecture, storage layout, and a list of upstream
 API behaviours that will bite you.
