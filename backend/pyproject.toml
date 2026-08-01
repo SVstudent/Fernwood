@@ -13,6 +13,10 @@ dependencies = [
     "openai>=1.50,<3",
     "python-dotenv>=1.0,<2",
     "pillow>=10,<12",
+    # ElevenLabsTTSProvider probes audio duration with mutagen; without it
+    # Asset.duration is None, AttemptContent.durationSeconds is omitted, and the
+    # player falls back to a hardcoded 8.5s instead of the real length.
+    "mutagen>=1.47,<2",
     # Genblaze: pinned exactly. The SDK is young (core 0.3.x) and signatures
     # have moved between patch releases; an unpinned resolve mid-hackathon is
     # a self-inflicted outage. uv.lock is committed alongside.
