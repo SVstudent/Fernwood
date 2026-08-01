@@ -1,6 +1,10 @@
 /**
  * Fernwood Core Data Types & Pipeline Models
- * MVP Scaffold with placeholder types for Backblaze B2 & Genblaze pipeline integrations.
+ *
+ * This file is the wire contract between the React app and the Python
+ * (Genblaze) backend. The backend serializes these exact camelCase shapes over
+ * /api and SSE — see backend/app/domain/models.py, which mirrors them field for
+ * field. Changing a type here means changing that file too.
  */
 
 export type ToneMood =
