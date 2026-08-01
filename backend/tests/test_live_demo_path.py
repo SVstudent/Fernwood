@@ -118,7 +118,17 @@ def demo_run():
                     break
 
     final = httpx.get(f"{BASE}/api/campaigns/{campaign_id}", timeout=30).json()
-    return {"id": campaign_id, "frames": frames, "campaign": final}
+
+    yield {"id": campaign_id, "frames": frames, "campaign": final}
+
+    # Clean up so running the suite does not pollute the demo library. Set
+    # FERNWOOD_KEEP_TEST_CAMPAIGNS=1 to keep the run for inspection.
+    if not os.environ.get("FERNWOOD_KEEP_TEST_CAMPAIGNS"):
+        try:
+            httpx.delete(f"{BASE}/api/campaigns/{campaign_id}", timeout=30)
+            print(f"\n  [live] cleaned up {campaign_id}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"\n  [live] cleanup failed for {campaign_id}: {exc}")
 
 
 @needs_server
