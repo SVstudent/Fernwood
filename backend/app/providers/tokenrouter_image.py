@@ -106,7 +106,17 @@ class TokenRouterImageProvider(SyncProvider):
             "model": step.model,
             "prompt": step.prompt or "",
             "n": 1,
-            "size": params.get("size", "1024x1024"),
+            # 2560x1440 = 3,686,400 px, which is EXACTLY seedream's documented
+            # minimum ("image size must be at least 3686400 pixels" — verified
+            # by probe; 1024x1024 is rejected with HTTP 400). It is also 16:9,
+            # matching the aspect ratio the campaign UI renders.
+            "size": params.get("size", "2560x1440"),
+            # Seedream stamps a visible "AI generated" badge by default, which
+            # the vision critique correctly flagged as making the asset
+            # unusable as-shipped (capping Technical Clarity ~72/80). The
+            # upstream field is a real bool — passing a string returns a Go
+            # unmarshal error naming `watermark` of type bool.
+            "watermark": params.get("watermark", False),
         }
         for key in ("quality", "background", "response_format", "seed"):
             if key in params and params[key] is not None:

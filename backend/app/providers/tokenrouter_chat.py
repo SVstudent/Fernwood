@@ -37,7 +37,7 @@ from genblaze_core.providers import SyncProvider
 from genblaze_openai import chat
 
 from app.config import SCRATCH_DIR
-from app.providers.client import tokenrouter_client
+from app.providers.client import NO_TEMPERATURE_PREFIXES, tokenrouter_client
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,11 @@ class TokenRouterChatStep(SyncProvider):
         for key in ("temperature", "max_tokens", "response_format"):
             if params.get(key) is not None:
                 kwargs[key] = params[key]
+
+        # Some upstreams reject `temperature` outright ("`temperature` is
+        # deprecated for this model" -> HTTP 400). Verified on anthropic/*.
+        if step.model.startswith(NO_TEMPERATURE_PREFIXES):
+            kwargs.pop("temperature", None)
         if not messages and params.get("system"):
             kwargs["system"] = params["system"]
 

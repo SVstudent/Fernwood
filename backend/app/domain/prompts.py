@@ -10,18 +10,107 @@ from __future__ import annotations
 
 from app.domain.models import CampaignBrief, CritiqueResult
 
+# The scoring guidance and the pass threshold MUST agree. An earlier version
+# told the model "first drafts rarely exceed 80" while the pass bar was 85,
+# which made passing effectively impossible and failed every campaign.
 CRITIQUE_SYSTEM = (
-    "You are a demanding brand art director reviewing generated campaign assets "
-    "against a client brief. You are hard to please: first drafts rarely exceed "
-    "80/100, and you only award 85+ when tone, palette and craft are all clearly "
-    "on-brief. Be specific and actionable — never generic. "
+    "You are a demanding but FAIR brand art director reviewing generated "
+    "campaign assets against a client brief.\n"
+    "Scoring calibration (follow it exactly):\n"
+    "- 85-95: the asset genuinely satisfies the brief's tone, palette and craft. "
+    "This is a PASS. Award it whenever the work meets the brief — do not withhold "
+    "a pass from work that is on-brief just to seem rigorous.\n"
+    "- 70-84: competent but with at least one clear, nameable miss.\n"
+    "- below 70: substantially off-brief.\n"
+    "A polished first draft may well score 85+. Revisions that fix the stated "
+    "problems should score higher than the attempt they revise.\n"
+    "Be specific and actionable — never generic. "
     "Respond ONLY with JSON matching the requested schema."
 )
 
 
+def hex_to_name(hex_code: str) -> str:
+    """Describe a hex colour in words.
+
+    Image models cannot interpret hex codes — passing '#1E3A2B' produced images
+    the critique correctly failed on palette adherence every time. Converting to
+    'deep forest green' is what actually steers the render.
+    """
+    raw = hex_code.strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    try:
+        r, g, b = (int(raw[i : i + 2], 16) for i in (0, 2, 4))
+    except (ValueError, IndexError):
+        return hex_code
+
+    mx, mn = max(r, g, b), min(r, g, b)
+    light = (mx + mn) / 2 / 255
+    chroma = (mx - mn) / 255
+
+    if chroma < 0.10:
+        if light > 0.92:
+            return "near-white"
+        if light > 0.75:
+            return "soft off-white"
+        if light > 0.55:
+            return "light warm grey"
+        if light > 0.3:
+            return "mid grey"
+        if light > 0.12:
+            return "charcoal"
+        return "near-black"
+
+    if mx == r:
+        hue = 60 * (((g - b) / (mx - mn)) % 6)
+    elif mx == g:
+        hue = 60 * (((b - r) / (mx - mn)) + 2)
+    else:
+        hue = 60 * (((r - g) / (mx - mn)) + 4)
+
+    for lo, hi, name in (
+        (0, 15, "red"),
+        (15, 40, "burnt orange"),
+        (40, 52, "amber"),
+        (52, 68, "golden yellow"),
+        (68, 95, "olive"),
+        (95, 160, "green"),
+        (160, 195, "teal"),
+        (195, 250, "blue"),
+        (250, 290, "violet"),
+        (290, 330, "magenta"),
+        (330, 361, "crimson"),
+    ):
+        if lo <= hue < hi:
+            base = name
+            break
+    else:
+        base = "neutral"
+
+    if light < 0.25:
+        qualifier = "deep "
+    elif light < 0.45:
+        qualifier = "rich "
+    elif light > 0.8:
+        qualifier = "pale "
+    elif light > 0.65:
+        qualifier = "soft "
+    else:
+        qualifier = ""
+    if chroma < 0.28 and qualifier in ("", "soft "):
+        qualifier = "muted "
+    if base == "green" and light < 0.35:
+        base = "forest green"
+    return f"{qualifier}{base}".strip()
+
+
 def _palette(brief: CampaignBrief) -> str:
     c = brief.colors
-    return f"primary {c.primary}, secondary {c.secondary}, accent {c.accent}"
+    return (
+        f"{hex_to_name(c.primary)} ({c.primary}) as the dominant colour, "
+        f"{hex_to_name(c.secondary)} ({c.secondary}) as the base/background, "
+        f"{hex_to_name(c.accent)} ({c.accent}) as the accent"
+    )
 
 
 def _tone(brief: CampaignBrief) -> str:
@@ -32,12 +121,15 @@ def build_image_prompt(
     brief: CampaignBrief, attempt: int, critique: CritiqueResult | None
 ) -> str:
     base = (
-        f"Commercial brand key visual for {brief.brand_name} — {brief.product_service}. "
+        f"Premium commercial brand key visual for {brief.brand_name} — "
+        f"{brief.product_service}. "
         f"Mood and tone: {_tone(brief)}. "
-        f"Colour palette: {_palette(brief)}. "
+        f"Colour palette: {_palette(brief)} — these colours must clearly dominate. "
         f"Target audience: {brief.target_audience}. "
-        "Editorial advertising photography, balanced composition, "
-        "generous negative space for overlaid copy, no text or lettering in the image."
+        "Editorial advertising photography, single clear hero subject, "
+        "soft natural directional light, shallow depth of field, "
+        "balanced composition with generous negative space for overlaid copy. "
+        "No text, lettering, logos or watermarks anywhere in the image."
     )
     if brief.brief_text.strip():
         base += f" Creative direction: {brief.brief_text.strip()}"
@@ -104,9 +196,12 @@ def image_rubric(brief: CampaignBrief, attempt: int) -> str:
         "Score these three criteria 0-100: 'Tone Match' (target 85), "
         "'Brand Consistency' (target 80, i.e. does the palette actually match), "
         "'Technical Clarity' (target 80, composition/artefacts/usability as an ad). "
-        "Set overallScore as your weighted judgement, and passed=true only if "
-        "overallScore >= 85. In suggestedFixes, give concrete art direction that "
-        "could be appended to an image-generation prompt to fix the problems."
+        "Set overallScore as your weighted judgement. The pass bar is 85: if this "
+        "image would be acceptable to ship as a campaign key visual for this "
+        "brief, score it 85 or above. In suggestedFixes, give concrete art "
+        "direction that could be appended to an image-generation prompt. "
+        "If this is attempt #2 or later, judge the image on its own merits — "
+        "reward genuine improvement rather than anchoring to earlier attempts."
     )
 
 
@@ -122,6 +217,7 @@ def text_rubric(brief: CampaignBrief, attempt: int, kind: str, content: str) -> 
         f"CONTENT UNDER REVIEW\n{content}\n\n"
         "Score these three criteria 0-100: 'Tone Match' (target 85), "
         "'Brand Consistency' (target 80), 'Technical Clarity' (target 80). "
-        "Set passed=true only if overallScore >= 85. In suggestedFixes give "
-        "concrete, actionable rewrite instructions."
+        "The pass bar is 85: if this copy would be acceptable to ship for this "
+        "brief, score it 85 or above. In suggestedFixes give concrete, "
+        "actionable rewrite instructions."
     )

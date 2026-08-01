@@ -90,8 +90,8 @@ def _run_image_attempt(campaign_id: str, brief: CampaignBrief, prompt: str, atte
             # number is cryptographically covered rather than merely implied
             # by a filename.
         },
-        params={"size": "1024x1024"},
-    ).run(sink=make_sink(campaign_id), timeout=240, raise_on_failure=True)
+        params={"size": "2560x1440"},  # 16:9 at seedream's minimum pixel count
+    ).run(sink=make_sink(campaign_id), timeout=300, raise_on_failure=True)
 
 
 # ---------------------------------------------------------------- text
