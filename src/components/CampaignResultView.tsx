@@ -83,7 +83,12 @@ ${approvedCpyAttempt?.content.socialPosts?.map(p => `> ${p}`).join('\n\n') || ''
 ## 4. Provenance Summary
 - Total Attempts Executed: ${campaign.totalAttemptsCount}
 - Auto-Retries Triggered: ${campaign.retryCount}
-- Backblaze B2 Payload ID: b2-file-${campaign.id}
+- Backblaze B2 Object Key: campaigns/${campaign.id}/campaign.json
+- Genblaze Manifests: campaigns/${campaign.id}/runs/ (one SHA-256-verified manifest per attempt)
+${[campaign.assets.image, campaign.assets.audio, campaign.assets.copy]
+  .filter(Boolean)
+  .flatMap((a) => a!.attempts.map((t) => `  - ${a!.type} attempt ${t.attemptNumber} [${t.critiqueVerdict}] sha256: ${t.content.manifestHash ?? 'n/a'}`))
+  .join('\n')}
     `.trim();
 
     const blob = new Blob([md], { type: 'text/markdown' });
@@ -238,6 +243,7 @@ ${approvedCpyAttempt?.content.socialPosts?.map(p => `> ${p}`).join('\n\n') || ''
               durationSeconds={approvedAudAttempt.content.durationSeconds || 8.5}
               waveformData={approvedAudAttempt.content.audioWaveformData}
               modelName={approvedAudAttempt.modelName}
+              audioUrl={approvedAudAttempt.content.audioUrl}
             />
           )}
         </div>
@@ -404,7 +410,7 @@ ${approvedCpyAttempt?.content.socialPosts?.map(p => `> ${p}`).join('\n\n') || ''
             <div className="flex items-center justify-between border-b border-stone-800 pb-3">
               <h3 className="font-mono text-xs font-bold text-amber-400 flex items-center gap-2">
                 <Database className="h-4 w-4" />
-                Backblaze B2 Payload: b2-file-{campaign.id}.json
+                Backblaze B2: campaigns/{campaign.id}/campaign.json
               </h3>
               <button
                 onClick={() => setShowExportModal(false)}

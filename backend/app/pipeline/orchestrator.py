@@ -81,11 +81,19 @@ def run_campaign(campaign: Campaign, brief: CampaignBrief) -> Campaign:
         campaign.overall_quality_score = (
             int(round(sum(approved_scores) / len(approved_scores))) if approved_scores else 0
         )
-        any_failed = any(
-            getattr(campaign.assets, t) and getattr(campaign.assets, t).status == "failed"
+
+        # A campaign is "failed" only when an asset could not be PRODUCED at all
+        # (provider outage, zero attempts). An asset that generated fine but
+        # never cleared the critique threshold still yields a usable kit — its
+        # own status stays 'failed' and every rejected attempt remains visible
+        # in the provenance log, so nothing is hidden. Marking the whole
+        # campaign failed for a strict quality bar would misreport a run that
+        # actually delivered all three assets.
+        produced_nothing = any(
+            (asset := getattr(campaign.assets, t)) is None or not asset.attempts
             for t in ("image", "audio", "copy")
         )
-        campaign.status = "failed" if any_failed else "completed"
+        campaign.status = "failed" if produced_nothing else "completed"
         campaign.updated_at = now_iso()
         save_campaign(campaign)
 

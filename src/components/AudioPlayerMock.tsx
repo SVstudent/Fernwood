@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, Volume2, VolumeX, RotateCcw, Mic, Sparkles } from 'lucide-react';
 
 interface AudioPlayerMockProps {
@@ -8,6 +8,9 @@ interface AudioPlayerMockProps {
   waveformData?: number[];
   providerName?: string;
   modelName?: string;
+  /** Real ElevenLabs MP3 (served from B2 via /api/media). When absent — e.g.
+   *  for the preseeded sample campaigns — playback falls back to simulation. */
+  audioUrl?: string;
 }
 
 export const AudioPlayerMock: React.FC<AudioPlayerMockProps> = ({
@@ -16,18 +19,27 @@ export const AudioPlayerMock: React.FC<AudioPlayerMockProps> = ({
   durationSeconds = 8.5,
   waveformData = [20, 35, 60, 85, 40, 70, 95, 30, 50, 75, 45, 80, 60, 35, 20],
   providerName = 'Genblaze Voice Synthesis',
-  modelName = 'genblaze-tts-pro'
+  modelName = 'genblaze-tts-pro',
+  audioUrl
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [audioError, setAudioError] = useState(false);
 
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [realDuration, setRealDuration] = useState<number | null>(null);
+  const isReal = !!audioUrl && !audioError;
+  const effectiveDuration = (isReal && realDuration) || durationSeconds || 8.5;
+
+  // Simulated playback — only when there is no real audio to drive the clock.
   useEffect(() => {
+    if (isReal) return;
     let timer: any;
     if (isPlaying) {
       timer = setInterval(() => {
         setCurrentTime((prev) => {
-          if (prev >= durationSeconds) {
+          if (prev >= effectiveDuration) {
             setIsPlaying(false);
             return 0;
           }
@@ -38,19 +50,62 @@ export const AudioPlayerMock: React.FC<AudioPlayerMockProps> = ({
       clearInterval(timer);
     }
     return () => clearInterval(timer);
-  }, [isPlaying, durationSeconds]);
+  }, [isPlaying, effectiveDuration, isReal]);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.muted = isMuted;
+  }, [isMuted]);
+
+  // Reset when a different attempt's audio is selected.
+  useEffect(() => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setAudioError(false);
+    setRealDuration(null);
+  }, [audioUrl]);
 
   const togglePlay = () => {
-    if (currentTime >= durationSeconds) {
-      setCurrentTime(0);
+    if (isReal && audioRef.current) {
+      const el = audioRef.current;
+      if (el.paused) {
+        if (el.ended || el.currentTime >= effectiveDuration) el.currentTime = 0;
+        void el.play().catch(() => setAudioError(true));
+      } else {
+        el.pause();
+      }
+      return;
     }
+    if (currentTime >= effectiveDuration) setCurrentTime(0);
     setIsPlaying(!isPlaying);
   };
 
-  const progressPercent = Math.min(100, (currentTime / durationSeconds) * 100);
+  const progressPercent = Math.min(100, (currentTime / effectiveDuration) * 100);
 
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs transition-all hover:border-stone-300">
+      {/* Real ElevenLabs audio, when this attempt produced any. Hidden — the
+          existing custom transport below drives it. */}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="metadata"
+          className="hidden"
+          onLoadedMetadata={(e) => {
+            const d = (e.target as HTMLAudioElement).duration;
+            if (Number.isFinite(d) && d > 0) setRealDuration(d);
+          }}
+          onTimeUpdate={(e) => setCurrentTime((e.target as HTMLAudioElement).currentTime)}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }}
+          onError={() => setAudioError(true)}
+        />
+      )}
+
       {/* Header Info */}
       <div className="flex items-center justify-between pb-3 border-b border-stone-100">
         <div className="flex items-center gap-2.5">
@@ -117,7 +172,10 @@ export const AudioPlayerMock: React.FC<AudioPlayerMockProps> = ({
           </button>
 
           <button
-            onClick={() => setCurrentTime(0)}
+            onClick={() => {
+              if (audioRef.current) audioRef.current.currentTime = 0;
+              setCurrentTime(0);
+            }}
             className="flex h-8 w-8 items-center justify-center rounded-full text-stone-500 hover:bg-stone-100 transition-colors"
             title="Restart"
           >
@@ -135,7 +193,7 @@ export const AudioPlayerMock: React.FC<AudioPlayerMockProps> = ({
           </div>
           <div className="flex justify-between text-[10px] text-stone-600 font-mono mt-1">
             <span>{currentTime.toFixed(1)}s</span>
-            <span>{durationSeconds.toFixed(1)}s</span>
+            <span>{effectiveDuration.toFixed(1)}s</span>
           </div>
         </div>
 
@@ -147,10 +205,18 @@ export const AudioPlayerMock: React.FC<AudioPlayerMockProps> = ({
         </button>
       </div>
 
-      {/* Code Comment Placeholder for Handoff */}
+      {/* Provenance / source strip */}
       <div className="mt-3 pt-2 border-t border-dashed border-stone-200 text-[10px] text-stone-600 font-mono flex items-center gap-1.5">
         <Sparkles className="h-3 w-3 text-amber-500" />
-        <span>backend-handoff: Replace mock waveform with HTML5 Audio element or Web Audio API stream</span>
+        {audioError ? (
+          <span className="text-rose-600">
+            Audio failed to load — showing the generated script only.
+          </span>
+        ) : isReal ? (
+          <span>ElevenLabs synthesis · streamed from Backblaze B2</span>
+        ) : (
+          <span>Sample campaign — simulated playback, no audio track</span>
+        )}
       </div>
     </div>
   );

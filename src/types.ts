@@ -45,6 +45,7 @@ export interface AttemptContent {
   audioVoice?: string;
   durationSeconds?: number;
   audioWaveformData?: number[];
+  audioUrl?: string; // real ElevenLabs mp3, served from B2 via /api/media
   
   // For Marketing Copy
   headline?: string;
@@ -58,6 +59,11 @@ export interface AttemptContent {
   primaryColor?: string;
   secondaryColor?: string;
   accentColor?: string;
+
+  // Genblaze provenance for this attempt (SHA-256 canonical manifest hash and
+  // the manifest's location in B2). Present for real generations only.
+  manifestHash?: string;
+  manifestUri?: string;
 }
 
 export interface Attempt {

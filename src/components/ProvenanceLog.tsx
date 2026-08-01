@@ -136,8 +136,12 @@ export const ProvenanceLog: React.FC<ProvenanceLogProps> = ({
                     <Sparkles className="h-3.5 w-3.5 text-amber-600" />
                     Prompt Revision Triggered by Critique
                   </div>
+                  {/* The actual critique that caused this retry — not a
+                      canned blurb. This is the causal link that makes the
+                      self-critique loop auditable. */}
                   <p className="text-[11px] leading-relaxed text-amber-800">
-                    Prompt was automatically restructured to fix previous critique gaps: emphasized warm lighting, organic texture, and tone alignment.
+                    {attempts[activeAttemptTab - 1]?.critique?.suggestedFixes ||
+                      'Prompt was automatically restructured to address the previous critique.'}
                   </p>
                 </div>
               )}

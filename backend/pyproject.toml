@@ -34,6 +34,9 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Live tests cost real money and take minutes, so a bare `pytest` skips them.
+# Opt in with: uv run pytest -m live
+addopts = "-m 'not live'"
 markers = [
     "live: hits real TokenRouter / ElevenLabs / B2 APIs (costs money, needs keys)",
 ]
