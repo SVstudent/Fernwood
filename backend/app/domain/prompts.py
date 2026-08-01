@@ -8,6 +8,8 @@ in Attempt.promptUsed and rendered by ProvenanceLog.
 
 from __future__ import annotations
 
+import re
+
 from app.domain.models import CampaignBrief, CritiqueResult
 
 # The scoring guidance and the pass threshold MUST agree. An earlier version
@@ -104,8 +106,22 @@ def hex_to_name(hex_code: str) -> str:
     return f"{qualifier}{base}".strip()
 
 
-def _palette(brief: CampaignBrief) -> str:
+def _palette(brief: CampaignBrief, *, include_hex: bool = True) -> str:
+    """Describe the brief's palette.
+
+    include_hex=False for IMAGE prompts. Image models render hex codes as
+    literal text: passing "(#1E3A2B)" produced posters with colour swatches
+    labelled "E3AB"/"D99" painted into the frame, which the critique then
+    correctly failed for containing lettering. Hex is still useful for the
+    text-based critique rubric, where nothing gets rendered.
+    """
     c = brief.colors
+    if not include_hex:
+        return (
+            f"{hex_to_name(c.primary)} as the dominant colour, "
+            f"{hex_to_name(c.secondary)} as the base/background, "
+            f"{hex_to_name(c.accent)} as the accent"
+        )
     return (
         f"{hex_to_name(c.primary)} ({c.primary}) as the dominant colour, "
         f"{hex_to_name(c.secondary)} ({c.secondary}) as the base/background, "
@@ -117,6 +133,31 @@ def _tone(brief: CampaignBrief) -> str:
     return ", ".join(brief.tone_tags) if brief.tone_tags else "Modern"
 
 
+_HEX_RE = re.compile(r"#?\b[0-9A-Fa-f]{6}\b")
+_SWATCH_RE = re.compile(
+    r"\b(palette strip|colour strip|color strip|swatch(?:es)?|colour chip|color chip|"
+    r"legend|annotation|caption|label(?:s|led|ed)?|hex code[s]?|hex value[s]?)\b",
+    re.IGNORECASE,
+)
+
+
+def sanitize_for_image_prompt(text: str) -> str:
+    """Strip anything that makes an image model paint text into the frame.
+
+    The retry prompt appends the critique's suggestedFixes verbatim — that is
+    the causal link that makes the loop real. But the critique rubric contains
+    hex codes, so the critique echoes them back, and seedream then renders
+    "#F4F1EA" as literal text next to a colour strip. Observed repeatedly.
+
+    Only the text handed to the IMAGE model is sanitized; the stored
+    Attempt.promptUsed keeps the sanitized version too, so what the provenance
+    log shows is genuinely what was sent.
+    """
+    cleaned = _HEX_RE.sub("that colour", text)
+    cleaned = _SWATCH_RE.sub("colour treatment", cleaned)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
 def build_image_prompt(
     brief: CampaignBrief, attempt: int, critique: CritiqueResult | None
 ) -> str:
@@ -124,23 +165,31 @@ def build_image_prompt(
         f"Premium commercial brand key visual for {brief.brand_name} — "
         f"{brief.product_service}. "
         f"Mood and tone: {_tone(brief)}. "
-        f"Colour palette: {_palette(brief)} — these colours must clearly dominate. "
+        # No hex codes here — see _palette(): image models paint them as text.
+        f"Colour palette: {_palette(brief, include_hex=False)} — these colours "
+        "must clearly dominate. "
         f"Target audience: {brief.target_audience}. "
         "Editorial advertising photography, single clear hero subject, "
         "soft natural directional light, shallow depth of field, "
         "balanced composition with generous negative space for overlaid copy. "
-        "No text, lettering, logos or watermarks anywhere in the image."
+        "This is a photograph of real objects only. Absolutely no text, "
+        "lettering, numbers, hex codes, colour swatches, palette strips, charts, "
+        "labels, logos or watermarks anywhere in the frame."
     )
     if brief.brief_text.strip():
         base += f" Creative direction: {brief.brief_text.strip()}"
     if attempt > 1 and critique is not None:
         # This is the retry loop made visible — the art director's notes go
-        # straight back into the generation prompt.
+        # straight back into the generation prompt, sanitized so hex codes and
+        # swatch language don't get painted into the image.
         base += (
             f"\n\nREVISION {attempt} — the previous attempt scored "
             f"{critique.overall_score}/100 and was rejected. "
-            f"Art director's required fixes: {critique.suggested_fixes} "
-            f"Reason for rejection: {critique.reasoning}"
+            f"Art director's required fixes: "
+            f"{sanitize_for_image_prompt(critique.suggested_fixes)} "
+            f"Reason for rejection: {sanitize_for_image_prompt(critique.reasoning)} "
+            "Apply these as photographic art direction only — still a clean "
+            "photograph with no text, numbers, swatches or palette strips."
         )
     return base
 
@@ -198,8 +247,14 @@ def image_rubric(brief: CampaignBrief, attempt: int) -> str:
         "'Technical Clarity' (target 80, composition/artefacts/usability as an ad). "
         "Set overallScore as your weighted judgement. The pass bar is 85: if this "
         "image would be acceptable to ship as a campaign key visual for this "
-        "brief, score it 85 or above. In suggestedFixes, give concrete art "
-        "direction that could be appended to an image-generation prompt. "
+        "brief, score it 85 or above. "
+        "The image must be a clean photograph of real objects: penalise any "
+        "text, numbers, colour swatches, palette strips or labels rendered into "
+        "the frame under Technical Clarity. "
+        "In suggestedFixes, give concrete art direction that could be appended "
+        "to an image-generation prompt — describe colours in WORDS only, never "
+        "as hex codes, and never suggest adding swatches, palette strips, "
+        "captions or any other lettering to the image. "
         "If this is attempt #2 or later, judge the image on its own merits — "
         "reward genuine improvement rather than anchoring to earlier attempts."
     )

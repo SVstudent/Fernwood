@@ -61,8 +61,26 @@ class TestPrompts:
         p = build_image_prompt(brief, 1, None)
         assert "Fernwood Goods" in p
         assert "forest green" in p  # translated, not raw hex
-        assert "#1E3A2B" in p  # hex retained for precision
         assert "Earthy & Organic" in p
+
+    def test_image_prompt_contains_no_hex_codes(self, brief):
+        """Regression: image models paint hex codes into the frame as literal
+        text. A generated poster came back with swatches labelled 'E3AB'/'D99',
+        which the critique then failed for containing lettering."""
+        p = build_image_prompt(brief, 1, None)
+        assert "#" not in p
+        for hexcode in ("1E3A2B", "F4F1EA", "D97706"):
+            assert hexcode not in p
+
+    def test_image_prompt_forbids_swatches_and_labels(self, brief):
+        p = build_image_prompt(brief, 1, None).lower()
+        assert "swatch" in p and "hex" in p
+
+    def test_text_rubric_may_keep_hex(self, brief):
+        """The critique is text-only, so precise hex helps it judge palette."""
+        from app.domain.prompts import image_rubric
+
+        assert "#1E3A2B" in image_rubric(brief, 1)
 
     def test_first_attempt_has_no_revision_block(self, brief):
         assert "REVISION" not in build_image_prompt(brief, 1, None)
@@ -85,7 +103,7 @@ class TestPrompts:
         assert "68" in p
 
     def test_image_prompt_forbids_text_in_render(self, brief):
-        assert "No text" in build_image_prompt(brief, 1, None)
+        assert "no text" in build_image_prompt(brief, 1, None).lower()
 
 
 class TestWireSerialization:

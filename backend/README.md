@@ -36,14 +36,52 @@ curl -s localhost:8787/api/health | python3 -m json.tool
 
 ## Scripts
 
+## Tests
+
+```bash
+uv run pytest              # 150 offline tests, no keys, no network (~65s)
+uv run pytest -m live      # 11 live tests against real TokenRouter/ElevenLabs/B2
+```
+
+Live tests are excluded by default (they cost money). They exist because the
+offline suite cannot catch upstream contract drift — the image size floor, the
+watermark default, which models return usable JSON, and whether the B2 key still
+works have each broken at least once.
+
 | Script | Needs keys? | What it proves |
 |---|---|---|
 | `uv run python scripts/test_storage.py` | no | Pipeline → ObjectStorageSink → `Manifest.verify() == True`, URL rewritten to `/api/media/...` |
 | `uv run python scripts/test_retry_loop.py` | no | A failed critique triggers attempt 2, whose prompt contains attempt 1's `suggestedFixes`; each attempt gets its own manifest |
 | `uv run python scripts/probe_tokenrouter.py` | **yes** | Which models the key can reach, the raw `/v1/images/generations` envelope, and whether the vision critique path actually works |
 
-Run `probe_tokenrouter.py` first after adding a key — it validates the two
-assumptions most likely to be wrong (image model IDs and the response shape).
+Run `probe_tokenrouter.py` first after changing keys or models.
+
+## Upstream facts learned the hard way
+
+Each of these was discovered by probing the live API, and each would silently
+break the product:
+
+- **Image size floor.** Seedream rejects anything under **3,686,400 px**
+  (`1024x1024` → HTTP 400). The default `2560x1440` is exactly that floor and
+  16:9.
+- **Watermark.** Seedream stamps a visible "AI generated" badge by default. The
+  vision critique caught it and capped Technical Clarity at ~72/80. We send
+  `watermark: false` (a real upstream bool — passing a string returns a Go
+  unmarshal error naming the field).
+- **`google/gemini-3.5-flash` returns HTTP 200 with EMPTY content** on
+  multimodal requests, and never clean JSON. This is the dangerous one: it looks
+  healthy while silently degrading every critique to the heuristic fallback.
+  Startup now probes for *non-empty parseable JSON*, not just a 200.
+- **`anthropic/*` rejects `temperature`** ("deprecated for this model" → 400)
+  and ignores `json_schema`, inventing its own keys.
+- **`openai/gpt-5.4` is the only model tested that does vision *and* obeys the
+  strict schema**, so it serves both critique and copy.
+- **Hex colours mean nothing to an image model.** Passing `#1E3A2B` produced
+  images that failed palette adherence every time; `hex_to_name()` converts it
+  to "deep forest green", which is what actually steers the render.
+- **B2 master keys do not work with the S3 API** ("Malformed Access Key Id").
+  The S3 endpoint needs a non-master application key — a 25-char key ID, not the
+  12-char account ID.
 
 ## Architecture
 
