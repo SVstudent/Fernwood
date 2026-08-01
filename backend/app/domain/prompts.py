@@ -205,6 +205,26 @@ def image_rubric(brief: CampaignBrief, attempt: int) -> str:
     )
 
 
+# The critique cannot see the generation schema, so without this it invents
+# structural rules ("should have 3 social posts, 5 bullets") that contradict the
+# actual contract and fails correct output on Technical Clarity forever.
+_STRUCTURE_NOTE = {
+    "marketing copy": (
+        "REQUIRED STRUCTURE (this is the agreed contract — output matching it is "
+        "CORRECT, do not penalise it): exactly one headline, one subheadline, one "
+        "bodyText, one callToAction, exactly 3 keyBenefitBullets, and exactly 2 "
+        "socialPosts. Judge the WRITING QUALITY and tone fit, not the number of "
+        "items. Only flag a structural problem if a field is empty, or if a single "
+        "string obviously contains several concatenated items."
+    ),
+    "voiceover script": (
+        "REQUIRED STRUCTURE: a single spoken script of roughly 35-55 words with no "
+        "stage directions or speaker labels, plus a short voice description. "
+        "Output matching that is CORRECT — judge how it sounds read aloud."
+    ),
+}
+
+
 def text_rubric(brief: CampaignBrief, attempt: int, kind: str, content: str) -> str:
     return (
         f"Evaluate this generated {kind} for {brief.brand_name} "
@@ -214,6 +234,7 @@ def text_rubric(brief: CampaignBrief, attempt: int, kind: str, content: str) -> 
         f"- Target audience: {brief.target_audience}\n"
         f"- Creative direction: {brief.brief_text or 'n/a'}\n"
         f"- This is attempt #{attempt}.\n\n"
+        f"{_STRUCTURE_NOTE.get(kind, '')}\n\n"
         f"CONTENT UNDER REVIEW\n{content}\n\n"
         "Score these three criteria 0-100: 'Tone Match' (target 85), "
         "'Brand Consistency' (target 80), 'Technical Clarity' (target 80). "

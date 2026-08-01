@@ -86,13 +86,29 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
 
 
 def delete_campaign(campaign_id: str) -> None:
+    """Remove a campaign from the library.
+
+    The campaign.json object must go too, not just the index entry: an empty or
+    stale index triggers rebuild_index(), which rescans storage for
+    campaign.json files — so deleting only the index entry would resurrect the
+    campaign on the next Library load.
+
+    Generated asset blobs and manifests under campaigns/{id}/runs/ are left in
+    place deliberately: they are the immutable provenance record, they may be
+    under object lock, and deleting them would be slow and irreversible.
+    """
+    backend = get_backend()
     with _lock:
         entries = [e for e in _read_index() if e.get("id") != campaign_id]
-        get_backend().put(
+        backend.put(
             INDEX_KEY,
             json.dumps(entries, ensure_ascii=False).encode("utf-8"),
             content_type="application/json",
         )
+        try:
+            backend.delete(campaign_key(campaign_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not delete campaign.json for %s: %s", campaign_id, exc)
 
 
 def rebuild_index() -> list[dict[str, Any]]:
