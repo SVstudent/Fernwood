@@ -89,7 +89,11 @@ class TokenRouterImageProvider(SyncProvider):
         api_key: str,
         base_url: str,
         *,
-        request_timeout: float = 180.0,
+        # 180s was too tight: seedream at 2560x1440 intermittently exceeded it
+        # and surfaced a provider error mid-run. Must stay BELOW the pipeline
+        # step timeout in tracks.py so the provider's own error (with a useful
+        # message) wins over a generic pipeline timeout.
+        request_timeout: float = 300.0,
         **kwargs: Any,
     ) -> None:
         # BaseProvider.__init__ is keyword-only (models, retry_policy,

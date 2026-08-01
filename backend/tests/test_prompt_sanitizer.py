@@ -60,6 +60,17 @@ class TestSanitizer:
     def test_empty_input(self):
         assert sanitize_for_image_prompt("") == ""
 
+    def test_stray_hash_removed(self):
+        """Critiques write 'as attempt #1'; a bare '#' is exactly the sort of
+        glyph the image model letters into the frame."""
+        out = sanitize_for_image_prompt("As attempt #2, the vessel styling works.")
+        assert "#" not in out
+        assert "attempt 2" in out
+
+    def test_no_hash_survives_any_input(self):
+        for text in ("#", "a # b", "issue #42 and #ABCDEF", "###"):
+            assert "#" not in sanitize_for_image_prompt(text)
+
     def test_six_char_words_that_are_not_hex_are_untouched(self):
         """'facade' and 'coffee' are valid hex strings — a naive regex would
         mangle them. Guard the false-positive rate."""

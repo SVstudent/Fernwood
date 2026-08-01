@@ -91,7 +91,10 @@ def _run_image_attempt(campaign_id: str, brief: CampaignBrief, prompt: str, atte
             # by a filename.
         },
         params={"size": "2560x1440"},  # 16:9 at seedream's minimum pixel count
-    ).run(sink=make_sink(campaign_id), timeout=300, raise_on_failure=True)
+        # Comfortably above the provider's own 300s request timeout, so a slow
+        # upstream produces the provider's descriptive error rather than an
+        # opaque pipeline timeout.
+    ).run(sink=make_sink(campaign_id), timeout=420, raise_on_failure=True)
 
 
 # ---------------------------------------------------------------- text

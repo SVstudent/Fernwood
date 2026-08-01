@@ -155,6 +155,11 @@ def sanitize_for_image_prompt(text: str) -> str:
     """
     cleaned = _HEX_RE.sub("that colour", text)
     cleaned = _SWATCH_RE.sub("colour treatment", cleaned)
+    # Drop any remaining '#'. Critiques write things like "as attempt #1",
+    # and a stray hash is exactly the kind of glyph the image model decides to
+    # letter into the frame. Nothing downstream needs it.
+    cleaned = re.sub(r"#\s*(\d)", r"\1", cleaned)
+    cleaned = cleaned.replace("#", "")
     return re.sub(r"\s{2,}", " ", cleaned).strip()
 
 
