@@ -161,8 +161,10 @@ def probe_models() -> None:
                 "critiques may degrade to heuristic verdicts."
             )
 
-    if not s.has_elevenlabs and s.fernwood_enable_tts:
-        Resolved.warnings.append("ELEVENLABS_API_KEY not set — audio track will degrade.")
+    if s.fernwood_tts_provider.lower() == "elevenlabs" and not s.has_elevenlabs:
+        Resolved.warnings.append(
+            "FERNWOOD_TTS_PROVIDER=elevenlabs but ELEVENLABS_API_KEY is unset."
+        )
 
     logger.info(
         "Resolved models: image=%s vision=%s chat=%s (catalog=%d models)",

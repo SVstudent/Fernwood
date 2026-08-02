@@ -44,6 +44,13 @@ async def health() -> dict:
             "visionModel": Resolved.vision_model,
             "chatModel": Resolved.chat_model,
         },
+        "voiceover": {
+            "provider": s.fernwood_tts_provider,
+            "enabled": s.fernwood_enable_tts,
+            "tokenrouterModel": s.fernwood_tts_model,
+            "tokenrouterVoice": s.fernwood_tts_voice,
+            "elevenlabsConfigured": s.has_elevenlabs,
+        },
         "elevenlabs": {
             "configured": s.has_elevenlabs,
             "enabled": s.fernwood_enable_tts,

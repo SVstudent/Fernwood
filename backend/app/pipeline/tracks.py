@@ -141,19 +141,24 @@ def _run_chat_attempt(
 
 
 # ---------------------------------------------------------------- audio
-def _run_tts(campaign_id: str, script: str, attempt: int, prev):
-    from genblaze_elevenlabs import ElevenLabsTTSProvider
-
+def _tts_pipeline(campaign_id: str, attempt: int, backend: str, prev):
     s = get_settings()
     pipe = Pipeline(
-        f"{campaign_id}-audio-tts-{attempt}",
+        f"{campaign_id}-audio-tts-{backend}-{attempt}",
         tenant_id="fernwood",
         project_id=campaign_id,
         preflight=False,
     )
     if prev is not None:
         pipe = pipe.from_result(prev)
-    return pipe.step(
+    return pipe
+
+
+def _run_tts_elevenlabs(campaign_id: str, script: str, attempt: int, prev):
+    from genblaze_elevenlabs import ElevenLabsTTSProvider
+
+    s = get_settings()
+    return _tts_pipeline(campaign_id, attempt, "elevenlabs", prev).step(
         # No output_dir: the default writes via mkstemp under the system temp
         # dir, which is where ObjectStorageSink is allowed to read file://
         # assets from. Pointing it elsewhere fails the upload.
@@ -165,9 +170,69 @@ def _run_tts(campaign_id: str, script: str, attempt: int, prev):
             "campaign_id": campaign_id,
             "asset_type": "audio",
             "attempt_number": attempt,
+            "tts_backend": "elevenlabs",
         },
         params={"voice_id": s.elevenlabs_voice_id, "output_format": "mp3_44100_128"},
     ).run(sink=make_sink(campaign_id), timeout=180, raise_on_failure=True)
+
+
+def _run_tts_tokenrouter(campaign_id: str, script: str, attempt: int, prev):
+    from app.providers.tokenrouter_tts import TokenRouterTTSProvider
+
+    s = get_settings()
+    return _tts_pipeline(campaign_id, attempt, "tokenrouter", prev).step(
+        TokenRouterTTSProvider(
+            api_key=s.tokenrouter_api_key, base_url=s.tokenrouter_base_url
+        ),
+        model=s.fernwood_tts_model,
+        prompt=script,
+        modality=Modality.AUDIO,
+        metadata={
+            "campaign_id": campaign_id,
+            "asset_type": "audio",
+            "attempt_number": attempt,
+            "tts_backend": "tokenrouter",
+        },
+        params={"voice": s.fernwood_tts_voice, "format": "mp3"},
+    ).run(sink=make_sink(campaign_id), timeout=300, raise_on_failure=True)
+
+
+def _run_tts(campaign_id: str, script: str, attempt: int, prev):
+    """Synthesize the voiceover, with a backend fallback.
+
+    Returns (result, backend_name, voice_label).
+
+    ElevenLabs' free tier is 10k characters/month and starts returning
+    auth_failure once spent, so 'auto' treats ANY ElevenLabs error as a reason
+    to fall through to TokenRouter rather than losing the audio track.
+    """
+    s = get_settings()
+    choice = (s.fernwood_tts_provider or "tokenrouter").lower()
+
+    order: list[str] = []
+    if choice == "elevenlabs":
+        order = ["elevenlabs"]
+    elif choice == "auto":
+        order = (["elevenlabs"] if s.has_elevenlabs else []) + ["tokenrouter"]
+    else:
+        order = ["tokenrouter"]
+
+    last_error: Exception | None = None
+    for backend in order:
+        if backend == "elevenlabs" and not s.has_elevenlabs:
+            continue
+        try:
+            if backend == "elevenlabs":
+                result = _run_tts_elevenlabs(campaign_id, script, attempt, prev)
+                return result, "elevenlabs", f"ElevenLabs {s.elevenlabs_model}"
+            result = _run_tts_tokenrouter(campaign_id, script, attempt, prev)
+            return result, "tokenrouter", f"TokenRouter {s.fernwood_tts_voice}"
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning("TTS backend %s failed: %s", backend, str(exc)[:200])
+            continue
+
+    raise last_error or RuntimeError("no TTS backend available")
 
 
 # ---------------------------------------------------------------- video
@@ -569,22 +634,33 @@ def _generate(
     )
     model_name = Resolved.chat_model
 
-    if settings.fernwood_enable_tts and settings.has_elevenlabs:
+    # TTS runs whenever it is enabled — the backend is chosen (and fallen back
+    # over) inside _run_tts, so an exhausted ElevenLabs quota no longer means
+    # no voiceover.
+    if settings.fernwood_enable_tts:
         try:
-            tts_result = _run_tts(campaign_id, script, n, script_result)
+            tts_result, backend, voice_label = _run_tts(
+                campaign_id, script, n, script_result
+            )
             audio_asset = tts_result.run.steps[0].assets[0]
             content.audio_url = public_media_url(audio_asset.url)
             content.duration_seconds = getattr(audio_asset, "duration", None)
+            content.audio_voice = f"{voice_desc} · {voice_label}"
             content.manifest_hash = tts_result.manifest.canonical_hash
             content.manifest_uri = public_media_url(tts_result.manifest.manifest_uri or "")
-            model_name = f"{settings.elevenlabs_model} + {Resolved.chat_model}"
+            tts_model = (
+                settings.elevenlabs_model
+                if backend == "elevenlabs"
+                else settings.fernwood_tts_model
+            )
+            model_name = f"{tts_model} + {Resolved.chat_model}"
             return content, prompt, model_name, tts_result
         except Exception as exc:  # noqa: BLE001 - degrade to script-only
             logger.warning("TTS failed on attempt %d: %s", n, exc)
             emit.warning(
                 "audio_gen",
                 "Voiceover Synthesis Unavailable",
-                f"Script generated, but ElevenLabs synthesis failed: {exc}",
+                f"Script generated, but every TTS backend failed: {exc}",
                 asset_type="audio",
             )
     return content, prompt, model_name, script_result

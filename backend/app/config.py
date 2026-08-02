@@ -48,11 +48,25 @@ class Settings(BaseSettings):
     # Write the provenance manifest into the delivered mp4/jpg/mp3 containers.
     fernwood_embed_provenance: bool = True
 
-    # --- ElevenLabs (audio only) ---
+    # --- Voiceover ---
+    # "tokenrouter" | "elevenlabs" | "auto"
+    #   auto -> prefer ElevenLabs when a key is present, fall back to
+    #           TokenRouter on ANY failure (its free tier is 10k chars/month and
+    #           returns auth_failure once exhausted, which killed the audio
+    #           track mid-demo).
+    # Default is tokenrouter: one key, no quota cliff, verified to transcribe
+    # back verbatim.
+    fernwood_tts_provider: str = "tokenrouter"
+    # gpt-audio-mini, not gpt-audio: the latter rejects non-streaming audio
+    # output with "Audio output requires stream: true".
+    fernwood_tts_model: str = "openai/gpt-audio-mini"
+    fernwood_tts_voice: str = "ash"
+    fernwood_enable_tts: bool = True
+
+    # --- ElevenLabs (optional voiceover backend) ---
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"  # provider's own default
     elevenlabs_model: str = "eleven_v3"
-    fernwood_enable_tts: bool = True
 
     # --- Storage ---
     # "local" -> LocalDiskBackend under backend/var/blobs

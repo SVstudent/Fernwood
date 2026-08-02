@@ -18,10 +18,19 @@ manifest stored in Backblaze B2.
 | Image generation | **TokenRouter** → `bytedance-seed/seedream-4.5`, through a custom `TokenRouterImageProvider` (`SyncProvider`) |
 | Brand film | **TokenRouter** → `MiniMax-Hailuo-2.3` image-to-video, through a custom `TokenRouterVideoProvider` (**async `BaseProvider`** — submit / poll / fetch_output) |
 | Critique + copy | **TokenRouter** → `openai/gpt-5.4` (vision + strict JSON schema) |
-| Voiceover | **ElevenLabs** via Genblaze's native `ElevenLabsTTSProvider` |
+| Voiceover | **TokenRouter** → `openai/gpt-audio-mini` via a custom `TokenRouterTTSProvider`; **ElevenLabs** optional with automatic fallback |
 | Frontend | React 19 + Vite + Tailwind v4, live progress over SSE |
 
-All inference goes through TokenRouter; ElevenLabs handles audio only.
+Every inference call now goes through a **single TokenRouter key** — image,
+video, critique, copy and voiceover. ElevenLabs remains wired as an optional
+voiceover backend but is no longer required.
+
+> **Why voiceover moved.** ElevenLabs' free tier is 10,000 characters/month; a
+> handful of campaigns exhaust it, after which every call returns
+> `auth_failure` and the audio track dies mid-run. TokenRouter's
+> `openai/gpt-audio-mini` produces 24 kHz MP3 that transcribes back verbatim,
+> with no second signup and no monthly cliff. Set
+> `FERNWOOD_TTS_PROVIDER=auto` to prefer ElevenLabs and fall back automatically.
 
 ### Two provider styles, chosen by the upstream API
 
@@ -66,8 +75,8 @@ npm install
 npm run dev            # http://localhost:3000
 ```
 
-Copy `.env.example` → `.env` and fill in `TOKENROUTER_API_KEY`, `ELEVENLABS_API_KEY`, and your B2
-credentials. Then check everything is wired:
+Copy `.env.example` → `.env` and fill in `TOKENROUTER_API_KEY` and your B2
+credentials. `ELEVENLABS_API_KEY` is optional — voiceover defaults to TokenRouter. Then check everything is wired:
 
 ```bash
 curl -s localhost:8787/api/health | python3 -m json.tool
@@ -84,7 +93,7 @@ B2 — same sink, same key layout, same manifests.
 | Asset | How |
 |---|---|
 | Key visual | Generated, critiqued by a vision model, retried up to 3× |
-| Voiceover | Script written by an LLM, spoken by ElevenLabs, critiqued |
+| Voiceover | Script written by an LLM, spoken by TokenRouter TTS, critiqued |
 | Copy suite | Headline, subheadline, body, CTA, 3 bullets, 2 social posts — critiqued |
 | Brand film *(opt-in)* | The **approved** key visual animated into a 6s cinematic spot |
 
@@ -111,8 +120,8 @@ it needs its own manifest rather than being overwritten.
 
 ```bash
 cd backend
-uv run pytest              # 190 offline tests — no keys, no network
-uv run pytest -m live      # 46 live tests against the real APIs
+uv run pytest              # 250 offline tests — no keys, no network
+uv run pytest -m live      # 60 live tests against the real APIs
 ```
 
 The live suite drives a complete campaign through the HTTP API exactly as the

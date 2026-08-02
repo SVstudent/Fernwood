@@ -211,24 +211,48 @@ class TestSelfCritiqueLoopIsReal:
                     assert 0 <= c["score"] <= 100
 
     def test_retry_prompt_incorporates_previous_critique(self, demo_run):
-        """The causal link. Skips only if nothing needed a retry."""
-        retried = [
-            asset
-            for asset in demo_run["campaign"]["assets"].values()
+        """The causal link that makes this a real self-critique loop.
+
+        Asserted exactly rather than fuzzily: image prompts run the critique
+        text through sanitize_for_image_prompt() (hex codes and swatch wording
+        are stripped before they reach the image model), so the expected
+        fragment is computed with that same function instead of a substring
+        guess that silently fell back to a length comparison.
+        """
+        from app.domain.prompts import sanitize_for_image_prompt
+
+        retried = {
+            kind: asset
+            for kind, asset in demo_run["campaign"]["assets"].items()
             if len(asset["attempts"]) > 1
-        ]
+        }
         if not retried:
             pytest.skip("everything passed first time this run")
-        for asset in retried:
+
+        for kind, asset in retried.items():
             first, second = asset["attempts"][0], asset["attempts"][1]
-            assert first["critiqueVerdict"] == "FAIL"
-            assert "REVISION 2" in second["promptUsed"]
+            assert first["critiqueVerdict"] == "FAIL", kind
+            assert "REVISION 2" in second["promptUsed"], kind
+
+            # The retry prompt must be strictly longer — it carries the extra
+            # revision block.
+            assert len(second["promptUsed"]) > len(first["promptUsed"]), kind
+
             fixes = first["critique"]["suggestedFixes"]
-            # Image prompts are sanitized, so compare on a distinctive fragment.
-            fragment = " ".join(fixes.split()[:6])
-            assert fragment[:20].lower() in second["promptUsed"].lower() or len(
-                second["promptUsed"]
-            ) > len(first["promptUsed"])
+            expected = (
+                sanitize_for_image_prompt(fixes) if kind == "image" else fixes
+            )
+            # Compare on a distinctive run of words rather than the whole
+            # string, so trailing-whitespace normalisation can't cause a
+            # spurious failure.
+            words = expected.split()
+            assert words, f"{kind}: critique produced no suggestedFixes"
+            fragment = " ".join(words[: min(8, len(words))])
+            assert fragment.lower() in second["promptUsed"].lower(), (
+                f"{kind}: attempt 2's prompt does not contain attempt 1's fixes.\n"
+                f"expected fragment: {fragment!r}\n"
+                f"prompt tail: {second['promptUsed'][-400:]!r}"
+            )
 
     def test_image_prompts_never_contain_hex(self, demo_run):
         """Regression: hex in the prompt gets painted into the poster."""
