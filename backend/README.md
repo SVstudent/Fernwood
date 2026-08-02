@@ -120,11 +120,38 @@ ones, which is the whole provenance story.
 ### Storage layout
 
 ```
-campaigns/{id}/campaign.json                              # our Campaign object
+campaigns/{id}/campaign.json                               # our Campaign object
 campaigns/{id}/runs/fernwood/{date}/{run_id}/manifest.json # genblaze provenance
-campaigns/{id}/runs/fernwood/{date}/{run_id}/assets/...    # image / audio bytes
+campaigns/{id}/runs/fernwood/{date}/{run_id}/assets/...    # image / audio / video bytes
+campaigns/{id}/delivery/{image,audio,video}.{ext}          # same assets, manifest EMBEDDED
 index/campaigns.json                                       # Library rollup
 ```
+
+`delivery/` is intentionally a separate tree. Embedding rewrites the container
+bytes, and the sink-stored originals are exactly what the manifest's SHA-256
+digests commit to — overwriting them in place would invalidate the hash being
+embedded.
+
+### Brand film (opt-in, `includeVideo: true`)
+
+`TokenRouterVideoProvider` is the project's only **async** provider, because
+TokenRouter's video API is a real task queue. It subclasses `BaseProvider`:
+
+| Method | Does |
+|---|---|
+| `submit()` | POSTs the task, returns `SubmitResult(prediction_id, estimated_seconds=110)` so the runner backs off sensibly |
+| `poll()` | `True` on any TERMINAL state — success *or* failure, per the base contract |
+| `fetch_output()` | Raises on failure; otherwise downloads the mp4, hashes it, attaches the `Asset` |
+
+Image-to-video needs a **publicly fetchable** first frame, so the approved key
+visual is handed over as a presigned B2 URL. That means video requires
+`FERNWOOD_STORAGE=b2` — a `LocalDiskBackend` URL points at localhost and
+TokenRouter's upstream cannot reach it. The track logs a clear warning and skips
+rather than failing the campaign.
+
+Providers disagree on the first-frame field name; `image_field_for()` maps it
+(`first_frame_image` for Hailuo, `image` for Kling, `input_reference` for
+Happyhorse, `images` array for Seedance).
 
 Switching `FERNWOOD_STORAGE=local` → `b2` swaps `LocalDiskBackend` for
 `S3StorageBackend.for_backblaze()` in `app/storage/factory.py` and changes
