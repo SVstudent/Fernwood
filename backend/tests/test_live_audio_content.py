@@ -78,6 +78,50 @@ def voiceover():
     pytest.skip("no campaign with generated audio in the library")
 
 
+@pytest.fixture(scope="module")
+def transcript(voiceover) -> str:
+    """Transcribe ONCE and share it.
+
+    Transcription is non-deterministic and costs a call per invocation, so
+    asserting against separate transcriptions made the suite flaky — a brand
+    name that came back "Farnwood" in one call and "Hadburn Wood" in another
+    failed a strict check while the audio itself was perfect.
+    """
+    api_key = os.environ["TOKENROUTER_API_KEY"]
+    b64 = base64.b64encode(voiceover["mp3"]).decode()
+    for model in TRANSCRIBE_MODELS:
+        resp = httpx.post(
+            f"{TR}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=300,
+            json={
+                "model": model,
+                "max_tokens": 500,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Transcribe this audio verbatim. "
+                                "Output only the words spoken.",
+                            },
+                            {
+                                "type": "input_audio",
+                                "input_audio": {"data": b64, "format": "mp3"},
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        if resp.status_code < 400:
+            text = resp.json()["choices"][0]["message"]["content"] or ""
+            if text.strip():
+                return text
+    pytest.fail("no audio model returned a transcript")
+
+
 @needs_server
 class TestAudioIsRealSpeech:
     def test_transcription_matches_the_generated_script(self, voiceover):
@@ -136,35 +180,35 @@ class TestAudioIsRealSpeech:
             f"transcript: {transcript}"
         )
 
-    def test_brand_name_is_audibly_spoken(self, voiceover):
-        """A generic or wrong take would not contain the brand."""
-        api_key = os.environ["TOKENROUTER_API_KEY"]
-        b64 = base64.b64encode(voiceover["mp3"]).decode()
-        resp = httpx.post(
-            f"{TR}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=300,
-            json={
-                "model": TRANSCRIBE_MODELS[0],
-                "max_tokens": 300,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Transcribe this audio verbatim."},
-                            {
-                                "type": "input_audio",
-                                "input_audio": {"data": b64, "format": "mp3"},
-                            },
-                        ],
-                    }
-                ],
-            },
+    def test_whole_script_was_spoken_not_just_the_opening(self, voiceover, transcript):
+        """Guards truncation: a clip cut short transcribes only its first words.
+
+        Deliberately checks the SCRIPT'S TAIL rather than the brand name —
+        proper nouns get mis-heard phonetically ("Fernwood" came back as
+        "Farnwood" and "Hadburn Wood" on different runs), so asserting on them
+        tests the transcriber rather than our audio.
+        """
+        said = _normalize(transcript)
+        expected = _normalize(voiceover["script"])
+        assert len(said) >= 0.7 * len(expected), (
+            f"transcript far shorter than script ({len(said)} vs {len(expected)} words) "
+            "— audio may be truncated"
         )
-        assert resp.status_code < 400
-        transcript = _normalize(resp.json()["choices"][0]["message"]["content"] or "")
-        first_word = _normalize(voiceover["script"].split(",")[0])
-        assert any(w in transcript for w in first_word if len(w) > 3)
+        tail = [w for w in expected[-8:] if len(w) > 3]
+        hits = sum(1 for w in tail if w in said)
+        assert hits >= max(1, len(tail) // 2), (
+            f"end of the script is missing from the audio; looked for {tail}"
+        )
+
+    def test_transcript_is_not_a_generic_take(self, voiceover, transcript):
+        """Distinctive brief vocabulary must actually be audible."""
+        said = set(_normalize(transcript))
+        expected = _normalize(voiceover["script"])
+        distinctive = [w for w in expected if len(w) > 5]
+        if not distinctive:
+            pytest.skip("script has no distinctive long tokens")
+        hit_rate = sum(1 for w in distinctive if w in said) / len(distinctive)
+        assert hit_rate >= 0.6, f"only {hit_rate:.0%} of distinctive words heard"
 
 
 @needs_server
