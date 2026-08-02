@@ -50,6 +50,11 @@ export interface AttemptContent {
   durationSeconds?: number;
   audioWaveformData?: number[];
   audioUrl?: string; // real ElevenLabs mp3, served from B2 via /api/media
+
+  // For Video (brand film animated from the approved key visual)
+  videoUrl?: string;
+  videoPosterUrl?: string;
+  videoDurationSeconds?: number;
   
   // For Marketing Copy
   headline?: string;
@@ -82,7 +87,7 @@ export interface Attempt {
   content: AttemptContent;
 }
 
-export type AssetType = 'image' | 'audio' | 'copy';
+export type AssetType = 'image' | 'audio' | 'copy' | 'video';
 
 export interface Asset {
   id: string;
@@ -100,6 +105,8 @@ export interface CampaignBrief {
   briefText: string;
   toneTags: string[];
   colors: ColorPreference;
+  /** Opt-in: adds a generated brand film (~2 min extra per campaign). */
+  includeVideo?: boolean;
 }
 
 export interface Campaign {
@@ -117,7 +124,14 @@ export interface Campaign {
     image?: Asset;
     audio?: Asset;
     copy?: Asset;
+    video?: Asset;
   };
+  /**
+   * Deliverables with the SHA-256 provenance manifest embedded in the file
+   * itself (asset kind -> /api/media URL). Extractable and verifiable without
+   * B2 or this service.
+   */
+  delivery?: Record<string, string>;
   overallQualityScore: number;
   totalAttemptsCount: number;
   retryCount: number;
@@ -131,6 +145,8 @@ export type PipelineStageId =
   | 'audio_critique'
   | 'copy_gen'
   | 'copy_critique'
+  | 'video_gen'
+  | 'video_critique'
   | 'assembly'
   | 'b2_upload';
 

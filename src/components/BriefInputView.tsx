@@ -80,6 +80,8 @@ const PRESET_TEMPLATES = [
   }
 ];
 
+const VIDEO_SECONDS = 6;
+
 export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief }) => {
   const [brandName, setBrandName] = useState('Fernwood Goods');
   const [productService, setProductService] = useState('Handcrafted Heritage Leather Bags & Sustainable Canvas Goods');
@@ -87,6 +89,7 @@ export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief })
   const [briefText, setBriefText] = useState('Highlight sustainable craftsmanship, warmth of forest oak leather, and lifetime durability. Tone should feel warm, grounded, and rustic yet refined.');
   const [selectedTones, setSelectedTones] = useState<string[]>(['Earthy & Organic', 'Cozy & Warm']);
   const [selectedPalette, setSelectedPalette] = useState<ColorPreference>(PALETTE_PRESETS[0].colors);
+  const [includeVideo, setIncludeVideo] = useState(false);
 
   const toggleTone = (tone: string) => {
     if (selectedTones.includes(tone)) {
@@ -117,7 +120,8 @@ export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief })
       targetAudience,
       briefText,
       toneTags: selectedTones,
-      colors: selectedPalette
+      colors: selectedPalette,
+      includeVideo
     });
   };
 
@@ -302,6 +306,27 @@ export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief })
           </div>
         </div>
 
+        {/* Brand film opt-in — off by default: video adds ~2 minutes and real
+            provider quota per campaign. */}
+        <label className="flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-5 cursor-pointer hover:border-stone-300 transition-colors">
+          <input
+            type="checkbox"
+            checked={includeVideo}
+            onChange={(e) => setIncludeVideo(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-[#D97706] cursor-pointer"
+          />
+          <span>
+            <span className="block text-sm font-bold text-stone-900 font-sans">
+              Also generate a brand film
+            </span>
+            <span className="block text-xs text-stone-600 font-sans mt-0.5">
+              Animates the <em>approved</em> key visual into a {' '}
+              {VIDEO_SECONDS}s cinematic spot via an asynchronous video pipeline.
+              Adds roughly two minutes to the run.
+            </span>
+          </span>
+        </label>
+
         {/* Submit CTA */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl bg-[#1E3A2B] p-6 text-white shadow-md">
           <div>
@@ -310,7 +335,8 @@ export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief })
               Ready to Run AI Critique Pipeline?
             </h3>
             <p className="text-xs text-stone-300 font-sans mt-0.5">
-              Generates Image, Audio, and Copy with self-critique scoring and automatic retries.
+              Generates Image, Audio{includeVideo ? ', Brand Film' : ''}, and Copy with
+              self-critique scoring and automatic retries.
             </p>
           </div>
 

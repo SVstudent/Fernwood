@@ -37,6 +37,17 @@ class Settings(BaseSettings):
     fernwood_image_model: str = ""
     fernwood_vision_model: str = ""
 
+    # --- Video (TokenRouter async task API) ---
+    # Verified live: MiniMax-Hailuo-2.3 image-to-video via `first_frame_image`,
+    # NOT_START -> SUCCESS in ~115s at 6s/768P.
+    fernwood_video_model: str = "MiniMax-Hailuo-2.3"
+    fernwood_video_duration: int = 6
+    fernwood_video_size: str = "768P"
+    # Master switch; the brief's includeVideo flag still gates it per campaign.
+    fernwood_enable_video: bool = True
+    # Write the provenance manifest into the delivered mp4/jpg/mp3 containers.
+    fernwood_embed_provenance: bool = True
+
     # --- ElevenLabs (audio only) ---
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"  # provider's own default

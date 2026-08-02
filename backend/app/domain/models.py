@@ -23,7 +23,7 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-AssetType = Literal["image", "audio", "copy"]
+AssetType = Literal["image", "audio", "copy", "video"]
 PipelineStageId = Literal[
     "brief_analysis",
     "image_gen",
@@ -32,6 +32,8 @@ PipelineStageId = Literal[
     "audio_critique",
     "copy_gen",
     "copy_critique",
+    "video_gen",
+    "video_critique",
     "assembly",
     "b2_upload",
 ]
@@ -62,6 +64,8 @@ class CampaignBrief(TSModel):
     brief_text: str = ""
     tone_tags: list[str] = []
     colors: ColorPreference
+    # Opt-in: video adds ~2 minutes and real quota per campaign.
+    include_video: bool = False
 
 
 class CritiqueCriterion(TSModel):
@@ -91,6 +95,10 @@ class AttemptContent(TSModel):
     duration_seconds: float | None = None
     audio_waveform_data: list[int] | None = None
     audio_url: str | None = None  # additive: real ElevenLabs mp3
+    # video
+    video_url: str | None = None
+    video_poster_url: str | None = None  # the approved key visual it animates
+    video_duration_seconds: float | None = None
     # copy
     headline: str | None = None
     subheadline: str | None = None
@@ -146,6 +154,7 @@ class CampaignAssets(TSModel):
     image: Asset | None = None
     audio: Asset | None = None
     copy: Asset | None = None  # type: ignore[assignment]
+    video: Asset | None = None
 
 
 class Campaign(TSModel):
@@ -163,12 +172,14 @@ class Campaign(TSModel):
     overall_quality_score: int = 0
     total_attempts_count: int = 0
     retry_count: int = 0
+    # asset_kind -> /api/media URL of the deliverable with its manifest embedded
+    delivery: dict[str, str] = {}
 
     def ts(self) -> dict[str, Any]:
         d = self.model_dump(by_alias=True, exclude_none=True)
         d["assets"] = {
             k: getattr(self.assets, k).ts()
-            for k in ("image", "audio", "copy")
+            for k in ("image", "audio", "copy", "video")
             if getattr(self.assets, k) is not None
         }
         return d

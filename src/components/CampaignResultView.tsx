@@ -11,6 +11,7 @@ import {
   Check, 
   ExternalLink, 
   Tag, 
+  Film, 
   Layers, 
   Code, 
   Maximize2, 
@@ -37,10 +38,12 @@ export const CampaignResultView: React.FC<CampaignResultViewProps> = ({
   const imageAsset = campaign.assets.image;
   const audioAsset = campaign.assets.audio;
   const copyAsset = campaign.assets.copy;
+  const videoAsset = campaign.assets.video;
 
   const approvedImgAttempt = imageAsset?.attempts.find(a => a.id === imageAsset.finalApprovedAttemptId) || imageAsset?.attempts[imageAsset.attempts.length - 1];
   const approvedAudAttempt = audioAsset?.attempts.find(a => a.id === audioAsset.finalApprovedAttemptId) || audioAsset?.attempts[audioAsset.attempts.length - 1];
   const approvedCpyAttempt = copyAsset?.attempts.find(a => a.id === copyAsset.finalApprovedAttemptId) || copyAsset?.attempts[copyAsset.attempts.length - 1];
+  const approvedVidAttempt = videoAsset?.attempts.find(a => a.id === videoAsset.finalApprovedAttemptId) || videoAsset?.attempts[videoAsset.attempts.length - 1];
 
   const handleCopyText = (text: string, fieldName: string) => {
     navigator.clipboard.writeText(text);
@@ -85,10 +88,13 @@ ${approvedCpyAttempt?.content.socialPosts?.map(p => `> ${p}`).join('\n\n') || ''
 - Auto-Retries Triggered: ${campaign.retryCount}
 - Backblaze B2 Object Key: campaigns/${campaign.id}/campaign.json
 - Genblaze Manifests: campaigns/${campaign.id}/runs/ (one SHA-256-verified manifest per attempt)
-${[campaign.assets.image, campaign.assets.audio, campaign.assets.copy]
+${[campaign.assets.image, campaign.assets.audio, campaign.assets.copy, campaign.assets.video]
   .filter(Boolean)
   .flatMap((a) => a!.attempts.map((t) => `  - ${a!.type} attempt ${t.attemptNumber} [${t.critiqueVerdict}] sha256: ${t.content.manifestHash ?? 'n/a'}`))
   .join('\n')}
+${campaign.delivery && Object.keys(campaign.delivery).length
+  ? `\n### Provenance-Embedded Deliverables\n${Object.entries(campaign.delivery).map(([k, u]) => `- ${k}: ${u} (manifest embedded in file)`).join('\n')}`
+  : ''}
     `.trim();
 
     const blob = new Blob([md], { type: 'text/markdown' });
@@ -235,6 +241,48 @@ ${[campaign.assets.image, campaign.assets.audio, campaign.assets.copy]
             </div>
           </div>
 
+          {/* Approved Brand Film — animated from the approved key visual */}
+          {approvedVidAttempt?.content.videoUrl && (
+            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+              <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200">
+                    <Film className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider font-mono">
+                      Approved Brand Film
+                    </h3>
+                    <p className="text-[11px] text-stone-500 font-mono">
+                      Model: {approvedVidAttempt.modelName}
+                      {approvedVidAttempt.content.videoDurationSeconds
+                        ? ` • ${approvedVidAttempt.content.videoDurationSeconds}s`
+                        : ''}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <video
+                src={approvedVidAttempt.content.videoUrl}
+                poster={approvedVidAttempt.content.videoPosterUrl}
+                controls
+                loop
+                playsInline
+                preload="metadata"
+                className="mt-4 w-full rounded-lg border border-stone-200 bg-stone-900"
+              />
+
+              <div className="mt-3 pt-2 border-t border-dashed border-stone-200 text-[10px] text-stone-600 font-mono flex items-center gap-1.5">
+                <Sparkles className="h-3 w-3 text-amber-500" />
+                <span>
+                  Animated from the approved key visual · async provider
+                  (submit → poll → fetch) · streamed from Backblaze B2
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Approved Audio Player Card */}
           {approvedAudAttempt && (
             <AudioPlayerMock
@@ -245,6 +293,33 @@ ${[campaign.assets.image, campaign.assets.audio, campaign.assets.copy]
               modelName={approvedAudAttempt.modelName}
               audioUrl={approvedAudAttempt.content.audioUrl}
             />
+          )}
+
+          {/* Deliverables carrying an embedded provenance manifest */}
+          {campaign.delivery && Object.keys(campaign.delivery).length > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+              <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 font-mono uppercase tracking-wider">
+                <ShieldCheck className="h-4 w-4" />
+                Provenance-Embedded Downloads
+              </div>
+              <p className="mt-1 text-[11px] text-emerald-800 leading-relaxed">
+                These files carry their SHA-256 manifest inside the container — the
+                full attempt history travels with the asset, verifiable without B2.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {Object.entries(campaign.delivery).map(([kind, url]) => (
+                  <a
+                    key={kind}
+                    href={url}
+                    download
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-emerald-900 hover:bg-emerald-100 transition-colors font-mono"
+                  >
+                    <Download className="h-3 w-3" />
+                    {kind}
+                  </a>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
@@ -381,6 +456,14 @@ ${[campaign.assets.image, campaign.assets.audio, campaign.assets.copy]
             <ProvenanceLog
               attempts={copyAsset.attempts}
               assetTypeTitle="Marketing Copy Asset Provenance"
+              defaultExpanded={false}
+            />
+          )}
+
+          {videoAsset && (
+            <ProvenanceLog
+              attempts={videoAsset.attempts}
+              assetTypeTitle="Brand Film Asset Provenance"
               defaultExpanded={false}
             />
           )}

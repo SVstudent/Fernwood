@@ -237,6 +237,25 @@ def build_voiceover_prompt(
     return base
 
 
+def build_video_prompt(brief: CampaignBrief) -> str:
+    """Motion direction for animating the approved key visual.
+
+    The still already carries the approved composition and palette, so this
+    describes CAMERA and MOTION only. Asking for new subject matter would let
+    the model redraw the scene and discard what passed critique.
+    """
+    return (
+        f"Cinematic brand film for {brief.brand_name} — {brief.product_service}. "
+        f"Mood: {_tone(brief)}. "
+        "Animate this still with restrained, premium motion: a slow push-in, "
+        "gentle parallax, and soft drifting natural light. "
+        "Keep the existing composition, subject and colour palette exactly as "
+        "they are — do not add, remove or redesign any objects. "
+        "No text, lettering, captions, logos or watermarks. "
+        "Steady camera, no whip pans, no fast cuts, no people entering frame."
+    )
+
+
 def image_rubric(brief: CampaignBrief, attempt: int) -> str:
     return (
         f"Evaluate this generated campaign image for {brief.brand_name} "

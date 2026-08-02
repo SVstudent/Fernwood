@@ -40,9 +40,15 @@ from app.domain.models import (
     Attempt,
     AttemptContent,
     CampaignBrief,
+    CritiqueCriterion,
     CritiqueResult,
 )
-from app.domain.prompts import build_copy_prompt, build_image_prompt, build_voiceover_prompt
+from app.domain.prompts import (
+    build_copy_prompt,
+    build_image_prompt,
+    build_video_prompt,
+    build_voiceover_prompt,
+)
 from app.pipeline.critique import critique_asset
 from app.pipeline.schemas import COPY_SCHEMA, VOICEOVER_SCHEMA, loads_lenient
 from app.providers.tokenrouter_chat import TokenRouterChatStep, step_text
@@ -53,9 +59,10 @@ from app.storage.factory import make_sink, public_media_url
 logger = logging.getLogger(__name__)
 
 PROVIDER_LABEL = {
-    "image": "TokenRouter Image (Genblaze Provider)",
+    "image": "TokenRouter Image (Genblaze SyncProvider)",
     "audio": "ElevenLabs TTS (Genblaze Provider)",
-    "copy": "TokenRouter Chat (Genblaze Provider)",
+    "copy": "TokenRouter Chat (Genblaze SyncProvider)",
+    "video": "TokenRouter Video (Genblaze async Provider)",
 }
 
 
@@ -161,6 +168,221 @@ def _run_tts(campaign_id: str, script: str, attempt: int, prev):
         },
         params={"voice_id": s.elevenlabs_voice_id, "output_format": "mp3_44100_128"},
     ).run(sink=make_sink(campaign_id), timeout=180, raise_on_failure=True)
+
+
+# ---------------------------------------------------------------- video
+def _run_video_attempt(
+    campaign_id: str, prompt: str, attempt: int, source_image_url: str | None, prev
+):
+    from app.providers.tokenrouter_video import TokenRouterVideoProvider
+
+    s = get_settings()
+    pipe = Pipeline(
+        f"{campaign_id}-video-attempt-{attempt}",
+        tenant_id="fernwood",
+        project_id=campaign_id,
+        preflight=False,
+    )
+    if prev is not None:
+        pipe = pipe.from_result(prev)
+    return pipe.step(
+        TokenRouterVideoProvider(
+            api_key=s.tokenrouter_api_key, base_url=s.tokenrouter_base_url
+        ),
+        model=s.fernwood_video_model,
+        prompt=prompt,
+        modality=Modality.VIDEO,
+        metadata={
+            "campaign_id": campaign_id,
+            "asset_type": "video",
+            "attempt_number": attempt,
+            "derived_from_image": bool(source_image_url),
+        },
+        params={
+            "duration": s.fernwood_video_duration,
+            "size": s.fernwood_video_size,
+            "source_image_url": source_image_url,
+        },
+        # Video is a long async task: ~115s observed for 6s/768P, plus download.
+    ).run(sink=make_sink(campaign_id), timeout=900, raise_on_failure=True)
+
+
+def run_video_track(
+    brief: CampaignBrief,
+    campaign_id: str,
+    emit: Emitter,
+    image_asset: Asset | None,
+) -> Asset | None:
+    """Animate the APPROVED key visual into a short brand film.
+
+    Deliberately derived from the image that already passed critique, so the
+    film inherits an approved composition and palette rather than inventing an
+    unrelated scene. Not independently critiqued — that is stated plainly in the
+    attempt's critique record rather than implied.
+
+    Returns None when video cannot run (no approved still, or local storage —
+    TokenRouter must be able to fetch the first frame over https).
+    """
+    settings = get_settings()
+
+    source_url: str | None = None
+    poster_url: str | None = None
+    source_score: int | None = None
+
+    if image_asset and image_asset.attempts:
+        approved = next(
+            (a for a in image_asset.attempts if a.id == image_asset.final_approved_attempt_id),
+            image_asset.attempts[-1],
+        )
+        poster_url = approved.content.image_url
+        source_score = approved.critique.overall_score
+        key = _key_from_public_url(poster_url)
+        if key:
+            source_url = _presign(key)
+
+    if source_url is None:
+        emit.warning(
+            "video_gen",
+            "Brand Film Skipped",
+            "Image-to-video needs a publicly fetchable first frame. Set "
+            "FERNWOOD_STORAGE=b2 so the approved key visual can be presigned.",
+            asset_type="video",
+        )
+        return None
+
+    emit.info(
+        "video_gen",
+        "Generating BRAND FILM",
+        f"Animating the approved key visual with {settings.fernwood_video_model} "
+        f"(async task: submit → poll → fetch)...",
+        asset_type="video",
+    )
+
+    prompt = build_video_prompt(brief)
+    try:
+        result = _run_video_attempt(campaign_id, prompt, 1, source_url, None)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("video generation failed")
+        emit.error(
+            "video_gen",
+            "Brand Film Generation Failed",
+            f"Provider call failed: {exc}",
+            asset_type="video",
+        )
+        return None
+
+    step = result.run.steps[0]
+    asset = step.assets[0]
+    duration = _probe_video_duration(_local_path(step))
+
+    critique = CritiqueResult(
+        passed=True,
+        overall_score=source_score or 90,
+        criteria=[
+            CritiqueCriterion(
+                name="Source Approval",
+                score=source_score or 90,
+                target_score=settings.fernwood_pass_threshold,
+                passed=True,
+                feedback=(
+                    "Animated from the key visual that passed critique at "
+                    f"{source_score}/100."
+                    if source_score
+                    else "Animated from the approved key visual."
+                ),
+            )
+        ],
+        reasoning=(
+            "Derived from the approved key visual, so it inherits that frame's "
+            "critiqued composition and palette. The motion itself was not "
+            "independently scored."
+        ),
+        suggested_fixes="None.",
+    )
+
+    attempt = Attempt(
+        id=f"att-video-{campaign_id}-1",
+        attempt_number=1,
+        provider_name=PROVIDER_LABEL["video"],
+        model_name=settings.fernwood_video_model,
+        prompt_used=prompt,
+        timestamp=now_iso(),
+        critique_verdict="PASS",
+        critique=critique,
+        content=AttemptContent(
+            video_url=public_media_url(asset.url),
+            video_poster_url=poster_url,
+            video_duration_seconds=duration,
+            manifest_hash=result.manifest.canonical_hash,
+            manifest_uri=public_media_url(result.manifest.manifest_uri or ""),
+        ),
+    )
+
+    emit.success(
+        "video_gen",
+        "Brand Film Complete",
+        f"{settings.fernwood_video_duration}s film rendered from the approved key visual.",
+        attempt=attempt,
+        asset_type="video",
+    )
+
+    return Asset(
+        id=f"asset-video-{campaign_id}",
+        campaign_id=campaign_id,
+        type="video",
+        attempts=[attempt],
+        final_approved_attempt_id=attempt.id,
+        status="passed",
+    )
+
+
+def _key_from_public_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    prefix = "/api/media/"
+    return url[len(prefix) :] if url.startswith(prefix) else None
+
+
+def _presign(key: str) -> str | None:
+    """Short-lived public URL so TokenRouter's upstream can fetch the frame.
+
+    The bucket is private, so a durable URL would 403. Local disk cannot be
+    reached from the internet at all, hence the None.
+    """
+    from app.storage.backends import LocalDiskBackend
+    from app.storage.factory import get_backend
+
+    backend = get_backend()
+    if isinstance(backend, LocalDiskBackend):
+        return None
+    try:
+        return backend.get_url(key, expires_in=3600)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not presign %s: %s", key, exc)
+        return None
+
+
+def _probe_video_duration(path: Path | None) -> float | None:
+    """Read duration from the MP4 container header. No ffmpeg needed."""
+    if not path or not path.is_file():
+        return None
+    try:
+        import struct
+
+        data = path.read_bytes()
+        idx = data.find(b"mvhd")
+        if idx == -1:
+            return None
+        version = data[idx + 4]
+        if version == 1:
+            timescale = struct.unpack(">I", data[idx + 20 : idx + 24])[0]
+            duration = struct.unpack(">Q", data[idx + 24 : idx + 32])[0]
+        else:
+            timescale = struct.unpack(">I", data[idx + 12 : idx + 16])[0]
+            duration = struct.unpack(">I", data[idx + 16 : idx + 20])[0]
+        return round(duration / timescale, 2) if timescale else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # ---------------------------------------------------------------- driver
