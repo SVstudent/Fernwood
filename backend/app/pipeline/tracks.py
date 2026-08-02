@@ -373,13 +373,19 @@ def _probe_video_duration(path: Path | None) -> float | None:
         idx = data.find(b"mvhd")
         if idx == -1:
             return None
+        # mvhd layout after the 4-byte 'mvhd' type:
+        #   version(1) flags(3)
+        #   v0: creation(4) modification(4) timescale(4) duration(4)
+        #   v1: creation(8) modification(8) timescale(4) duration(8)
+        # The 3 flag bytes are easy to forget — omitting them reads the
+        # modification time as the timescale and yields None/garbage.
         version = data[idx + 4]
         if version == 1:
-            timescale = struct.unpack(">I", data[idx + 20 : idx + 24])[0]
-            duration = struct.unpack(">Q", data[idx + 24 : idx + 32])[0]
+            timescale = struct.unpack(">I", data[idx + 24 : idx + 28])[0]
+            duration = struct.unpack(">Q", data[idx + 28 : idx + 36])[0]
         else:
-            timescale = struct.unpack(">I", data[idx + 12 : idx + 16])[0]
-            duration = struct.unpack(">I", data[idx + 16 : idx + 20])[0]
+            timescale = struct.unpack(">I", data[idx + 16 : idx + 20])[0]
+            duration = struct.unpack(">I", data[idx + 20 : idx + 24])[0]
         return round(duration / timescale, 2) if timescale else None
     except Exception:  # noqa: BLE001
         return None
@@ -523,7 +529,7 @@ def _generate(
             secondary_color=brief.colors.secondary,
             accent_color=brief.colors.accent,
             manifest_hash=result.manifest.canonical_hash,
-            manifest_uri=result.manifest.manifest_uri,
+            manifest_uri=public_media_url(result.manifest.manifest_uri or ""),
         )
         return content, prompt, Resolved.image_model, result
 
@@ -539,7 +545,7 @@ def _generate(
             key_benefit_bullets=[str(x) for x in (parsed.get("keyBenefitBullets") or [])],
             social_posts=[str(x) for x in (parsed.get("socialPosts") or [])],
             manifest_hash=result.manifest.canonical_hash,
-            manifest_uri=result.manifest.manifest_uri,
+            manifest_uri=public_media_url(result.manifest.manifest_uri or ""),
         )
         return content, prompt, Resolved.chat_model, result
 
@@ -559,7 +565,7 @@ def _generate(
         audio_voice=voice_desc,
         audio_waveform_data=[15, 30, 65, 80, 45, 90, 75, 40, 85, 95, 50, 30, 15],
         manifest_hash=script_result.manifest.canonical_hash,
-        manifest_uri=script_result.manifest.manifest_uri,
+        manifest_uri=public_media_url(script_result.manifest.manifest_uri or ""),
     )
     model_name = Resolved.chat_model
 
@@ -570,7 +576,7 @@ def _generate(
             content.audio_url = public_media_url(audio_asset.url)
             content.duration_seconds = getattr(audio_asset, "duration", None)
             content.manifest_hash = tts_result.manifest.canonical_hash
-            content.manifest_uri = tts_result.manifest.manifest_uri
+            content.manifest_uri = public_media_url(tts_result.manifest.manifest_uri or "")
             model_name = f"{settings.elevenlabs_model} + {Resolved.chat_model}"
             return content, prompt, model_name, tts_result
         except Exception as exc:  # noqa: BLE001 - degrade to script-only
