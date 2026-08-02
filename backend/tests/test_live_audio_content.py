@@ -87,6 +87,22 @@ def transcript(voiceover) -> str:
     name that came back "Farnwood" in one call and "Hadburn Wood" in another
     failed a strict check while the audio itself was perfect.
     """
+    # Prefer Deepgram STT: a purpose-built ASR returns the spoken words and
+    # nothing else. The audio *chat* models prepend commentary ("Here it is,
+    # verbatim:") and mis-hear proper nouns, which made this suite flaky.
+    from app.config import get_settings
+
+    s = get_settings()
+    if s.has_deepgram:
+        from app.providers.deepgram_tts import transcribe
+
+        text, confidence = transcribe(
+            voiceover["mp3"], s.deepgram_api_key, model=s.deepgram_stt_model
+        )
+        if text.strip():
+            print(f"\n  [live] deepgram STT confidence: {confidence:.3f}")
+            return text
+
     api_key = os.environ["TOKENROUTER_API_KEY"]
     b64 = base64.b64encode(voiceover["mp3"]).decode()
     for model in TRANSCRIBE_MODELS:
@@ -124,45 +140,13 @@ def transcript(voiceover) -> str:
 
 @needs_server
 class TestAudioIsRealSpeech:
-    def test_transcription_matches_the_generated_script(self, voiceover):
-        """The load-bearing assertion: the audio says what the script says."""
-        api_key = os.environ["TOKENROUTER_API_KEY"]
-        b64 = base64.b64encode(voiceover["mp3"]).decode()
+    def test_transcription_matches_the_generated_script(self, voiceover, transcript):
+        """The load-bearing assertion: the audio says what the script says.
 
-        transcript = None
-        for model in TRANSCRIBE_MODELS:
-            resp = httpx.post(
-                f"{TR}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=300,
-                json={
-                    "model": model,
-                    "max_tokens": 500,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": "Transcribe this audio verbatim. "
-                                    "Output only the words spoken.",
-                                },
-                                {
-                                    "type": "input_audio",
-                                    "input_audio": {"data": b64, "format": "mp3"},
-                                },
-                            ],
-                        }
-                    ],
-                },
-            )
-            if resp.status_code < 400:
-                text = resp.json()["choices"][0]["message"]["content"] or ""
-                if text.strip():
-                    transcript = text
-                    break
-        assert transcript, "no audio model returned a transcript"
-
+        Uses the shared transcript fixture (Deepgram STT when available) rather
+        than making its own call — two independent transcriptions of the same
+        audio disagreed on proper nouns and made this flaky.
+        """
         said = _normalize(transcript)
         expected = _normalize(voiceover["script"])
         assert said, "transcript was empty — the audio may be silent"
@@ -172,8 +156,8 @@ class TestAudioIsRealSpeech:
         print(f"  [live] transcript: {transcript.strip()[:90]}...")
         print(f"  [live] word overlap: {overlap:.0%}")
 
-        # Word-for-word matches have been observed; 80% tolerates TTS eliding
-        # punctuation or a transcriber's minor spelling choices.
+        # 100% has been observed with Deepgram STT; 80% leaves room for a TTS
+        # eliding punctuation or an ASR spelling an unusual brand differently.
         assert overlap >= 0.80, (
             f"transcript diverges from script (overlap {overlap:.0%})\n"
             f"script    : {voiceover['script']}\n"

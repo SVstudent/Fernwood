@@ -49,19 +49,23 @@ class Settings(BaseSettings):
     fernwood_embed_provenance: bool = True
 
     # --- Voiceover ---
-    # "tokenrouter" | "elevenlabs" | "auto"
-    #   auto -> prefer ElevenLabs when a key is present, fall back to
-    #           TokenRouter on ANY failure (its free tier is 10k chars/month and
-    #           returns auth_failure once exhausted, which killed the audio
-    #           track mid-demo).
-    # Default is tokenrouter: one key, no quota cliff, verified to transcribe
-    # back verbatim.
-    fernwood_tts_provider: str = "tokenrouter"
+    # "tokenrouter" | "deepgram" | "elevenlabs" | "auto"
+    #   auto (default) -> tokenrouter, then deepgram, then elevenlabs; ANY
+    #                     failure falls through to the next backend so a vendor
+    #                     quota can never cost us the audio track. ElevenLabs is
+    #                     last because its free tier is 10k chars/month and
+    #                     returns auth_failure once spent.
+    fernwood_tts_provider: str = "auto"
     # gpt-audio-mini, not gpt-audio: the latter rejects non-streaming audio
     # output with "Audio output requires stream: true".
     fernwood_tts_model: str = "openai/gpt-audio-mini"
     fernwood_tts_voice: str = "ash"
     fernwood_enable_tts: bool = True
+
+    # --- Deepgram (fallback voiceover backend + STT for verification) ---
+    deepgram_api_key: str = ""
+    deepgram_tts_model: str = "aura-2-thalia-en"   # Deepgram's "model" IS the voice
+    deepgram_stt_model: str = "nova-3"
 
     # --- ElevenLabs (optional voiceover backend) ---
     elevenlabs_api_key: str = ""
@@ -98,6 +102,10 @@ class Settings(BaseSettings):
     @property
     def has_tokenrouter(self) -> bool:
         return bool(self.tokenrouter_api_key.strip())
+
+    @property
+    def has_deepgram(self) -> bool:
+        return bool(self.deepgram_api_key.strip())
 
     @property
     def has_elevenlabs(self) -> bool:

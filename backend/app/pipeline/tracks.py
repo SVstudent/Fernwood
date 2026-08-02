@@ -197,42 +197,78 @@ def _run_tts_tokenrouter(campaign_id: str, script: str, attempt: int, prev):
     ).run(sink=make_sink(campaign_id), timeout=300, raise_on_failure=True)
 
 
+def _run_tts_deepgram(campaign_id: str, script: str, attempt: int, prev):
+    from app.providers.deepgram_tts import DeepgramTTSProvider
+
+    s = get_settings()
+    return _tts_pipeline(campaign_id, attempt, "deepgram", prev).step(
+        DeepgramTTSProvider(api_key=s.deepgram_api_key),
+        # Deepgram's "model" IS the voice (aura-2-thalia-en etc.).
+        model=s.deepgram_tts_model,
+        prompt=script,
+        modality=Modality.AUDIO,
+        metadata={
+            "campaign_id": campaign_id,
+            "asset_type": "audio",
+            "attempt_number": attempt,
+            "tts_backend": "deepgram",
+        },
+        params={"encoding": "mp3"},
+    ).run(sink=make_sink(campaign_id), timeout=240, raise_on_failure=True)
+
+
+# backend -> (runner, key-present predicate, human label)
+_TTS_BACKENDS: dict[str, tuple] = {
+    "tokenrouter": (
+        _run_tts_tokenrouter,
+        lambda s: s.has_tokenrouter,
+        lambda s: f"TokenRouter {s.fernwood_tts_voice}",
+    ),
+    "deepgram": (
+        _run_tts_deepgram,
+        lambda s: s.has_deepgram,
+        lambda s: f"Deepgram {s.deepgram_tts_model}",
+    ),
+    "elevenlabs": (
+        _run_tts_elevenlabs,
+        lambda s: s.has_elevenlabs,
+        lambda s: f"ElevenLabs {s.elevenlabs_model}",
+    ),
+}
+
+# Order for FERNWOOD_TTS_PROVIDER=auto. Deepgram sits ahead of ElevenLabs
+# because ElevenLabs' free tier (10k chars/month) returns auth_failure once
+# spent — observed live at 9,983/10,000, which killed the audio track.
+_AUTO_ORDER = ("tokenrouter", "deepgram", "elevenlabs")
+
+
 def _run_tts(campaign_id: str, script: str, attempt: int, prev):
-    """Synthesize the voiceover, with a backend fallback.
+    """Synthesize the voiceover, falling through backends on ANY failure.
 
-    Returns (result, backend_name, voice_label).
-
-    ElevenLabs' free tier is 10k characters/month and starts returning
-    auth_failure once spent, so 'auto' treats ANY ElevenLabs error as a reason
-    to fall through to TokenRouter rather than losing the audio track.
+    Returns (result, backend_name, voice_label). A vendor quota or outage
+    should never cost the campaign its audio track, so every configured
+    backend is tried in turn before giving up.
     """
     s = get_settings()
-    choice = (s.fernwood_tts_provider or "tokenrouter").lower()
-
-    order: list[str] = []
-    if choice == "elevenlabs":
-        order = ["elevenlabs"]
-    elif choice == "auto":
-        order = (["elevenlabs"] if s.has_elevenlabs else []) + ["tokenrouter"]
-    else:
-        order = ["tokenrouter"]
+    choice = (s.fernwood_tts_provider or "auto").lower()
+    order = _AUTO_ORDER if choice == "auto" else (choice,)
 
     last_error: Exception | None = None
     for backend in order:
-        if backend == "elevenlabs" and not s.has_elevenlabs:
+        entry = _TTS_BACKENDS.get(backend)
+        if entry is None:
+            continue
+        runner, has_key, label = entry
+        if not has_key(s):
             continue
         try:
-            if backend == "elevenlabs":
-                result = _run_tts_elevenlabs(campaign_id, script, attempt, prev)
-                return result, "elevenlabs", f"ElevenLabs {s.elevenlabs_model}"
-            result = _run_tts_tokenrouter(campaign_id, script, attempt, prev)
-            return result, "tokenrouter", f"TokenRouter {s.fernwood_tts_voice}"
+            return runner(campaign_id, script, attempt, prev), backend, label(s)
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             logger.warning("TTS backend %s failed: %s", backend, str(exc)[:200])
             continue
 
-    raise last_error or RuntimeError("no TTS backend available")
+    raise last_error or RuntimeError("no TTS backend is configured")
 
 
 # ---------------------------------------------------------------- video
@@ -648,11 +684,10 @@ def _generate(
             content.audio_voice = f"{voice_desc} · {voice_label}"
             content.manifest_hash = tts_result.manifest.canonical_hash
             content.manifest_uri = public_media_url(tts_result.manifest.manifest_uri or "")
-            tts_model = (
-                settings.elevenlabs_model
-                if backend == "elevenlabs"
-                else settings.fernwood_tts_model
-            )
+            tts_model = {
+                "elevenlabs": settings.elevenlabs_model,
+                "deepgram": settings.deepgram_tts_model,
+            }.get(backend, settings.fernwood_tts_model)
             model_name = f"{tts_model} + {Resolved.chat_model}"
             return content, prompt, model_name, tts_result
         except Exception as exc:  # noqa: BLE001 - degrade to script-only

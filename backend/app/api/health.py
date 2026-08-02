@@ -49,6 +49,8 @@ async def health() -> dict:
             "enabled": s.fernwood_enable_tts,
             "tokenrouterModel": s.fernwood_tts_model,
             "tokenrouterVoice": s.fernwood_tts_voice,
+            "deepgramConfigured": s.has_deepgram,
+            "deepgramVoice": s.deepgram_tts_model,
             "elevenlabsConfigured": s.has_elevenlabs,
         },
         "elevenlabs": {

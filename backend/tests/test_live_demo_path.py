@@ -388,7 +388,11 @@ class TestProvenanceInB2:
                     attempt_numbers.add(step.metadata["attempt_number"])
         assert "tokenrouter-image" in providers
         assert "tokenrouter-chat" in providers
-        assert "elevenlabs-tts" in providers
+        # The voiceover backend is chosen at runtime with fallback
+        # (tokenrouter -> deepgram -> elevenlabs), so assert that SOME TTS
+        # provider was recorded rather than pinning one vendor.
+        tts = {p for p in providers if p.endswith("-tts")}
+        assert tts, f"no TTS provider recorded in manifests; saw {sorted(providers)}"
         # attempt_number lives in Step.metadata, which IS covered by the
         # canonical hash — so the retry index is cryptographically bound.
         assert attempt_numbers, "no attempt_number recorded in step metadata"

@@ -154,9 +154,101 @@ class TestLiveImageProvider:
             assert im.size == (2560, 1440)  # 16:9 at the pixel floor
 
 
+def _elevenlabs_quota_left() -> int | None:
+    """Characters remaining on the ElevenLabs plan, or None if unknown."""
+    s = _settings()
+    if not s.has_elevenlabs:
+        return None
+    try:
+        r = httpx.get(
+            "https://api.elevenlabs.io/v1/user/subscription",
+            headers={"xi-api-key": s.elevenlabs_api_key},
+            timeout=20,
+        )
+        if r.status_code >= 400:
+            return None
+        d = r.json()
+        return int(d["character_limit"]) - int(d["character_count"])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@needs_tokenrouter
+class TestLiveTokenRouterTTS:
+    """The default voiceover backend — one key, no monthly character cliff."""
+
+    def test_synthesises_playable_mp3(self):
+        import io
+
+        from genblaze_core import Modality, Pipeline
+        from mutagen.mp3 import MP3
+
+        from app.providers.tokenrouter_tts import TokenRouterTTSProvider
+        from app.storage.factory import make_sink
+
+        s = _settings()
+        result = (
+            Pipeline("live-tr-tts", tenant_id="fernwood", preflight=False)
+            .step(
+                TokenRouterTTSProvider(
+                    api_key=s.tokenrouter_api_key, base_url=s.tokenrouter_base_url
+                ),
+                model=s.fernwood_tts_model,
+                prompt="Fernwood Goods. Made slowly, made to last.",
+                modality=Modality.AUDIO,
+                voice=s.fernwood_tts_voice,
+            )
+            .run(sink=make_sink("camp-live-tr-tts"), timeout=300, raise_on_failure=True)
+        )
+        asset = result.run.steps[0].assets[0]
+        assert asset.media_type == "audio/mpeg"
+        assert asset.size_bytes and asset.size_bytes > 5_000
+        assert len(asset.sha256) == 64
+        assert result.manifest.verify() is True
+
+        # Read straight from the storage backend rather than over HTTP: the
+        # test process points storage at a throwaway root, so its public URL
+        # host does not resolve.
+        from app.storage.factory import get_backend
+
+        backend = get_backend()
+        raw = backend.get(backend.key_from_url(asset.url))
+        info = MP3(io.BytesIO(raw)).info
+        assert info.length > 1.0, "audio is implausibly short"
+        assert raw[:3] == b"ID3" or raw[:2] == b"\xff\xfb"
+
+    def test_configured_model_supports_audio_output(self):
+        """gpt-audio (non-mini) rejects this with 'requires stream: true' —
+        guard against the default drifting to a model that cannot do it."""
+        s = _settings()
+        r = httpx.post(
+            f"{s.tokenrouter_base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {s.tokenrouter_api_key}"},
+            json={
+                "model": s.fernwood_tts_model,
+                "modalities": ["text", "audio"],
+                "audio": {"voice": s.fernwood_tts_voice, "format": "mp3"},
+                "messages": [{"role": "user", "content": "Say: hello."}],
+            },
+            timeout=180,
+        )
+        assert r.status_code == 200, r.text[:300]
+        assert r.json()["choices"][0]["message"].get("audio", {}).get("data")
+
+
 @needs_elevenlabs
 class TestLiveElevenLabs:
+    """Optional backend. Skips (rather than fails) when the free-tier character
+    allowance is spent — that is an account state, not a regression, and the
+    pipeline falls back to TokenRouter automatically."""
+
     def test_synthesises_playable_mp3(self):
+        remaining = _elevenlabs_quota_left()
+        if remaining is not None and remaining < 200:
+            pytest.skip(
+                f"ElevenLabs quota exhausted ({remaining} chars left) — "
+                "pipeline falls back to TokenRouter TTS"
+            )
         from genblaze_core import Modality, Pipeline
         from genblaze_elevenlabs import ElevenLabsTTSProvider
 
