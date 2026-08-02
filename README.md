@@ -18,19 +18,21 @@ manifest stored in Backblaze B2.
 | Image generation | **TokenRouter** → `bytedance-seed/seedream-4.5`, through a custom `TokenRouterImageProvider` (`SyncProvider`) |
 | Brand film | **TokenRouter** → `MiniMax-Hailuo-2.3` image-to-video, through a custom `TokenRouterVideoProvider` (**async `BaseProvider`** — submit / poll / fetch_output) |
 | Critique + copy | **TokenRouter** → `openai/gpt-5.4` (vision + strict JSON schema) |
-| Voiceover | **TokenRouter** → `openai/gpt-audio-mini` via a custom `TokenRouterTTSProvider`; **ElevenLabs** optional with automatic fallback |
+| Voiceover | **TokenRouter** `openai/gpt-audio-mini` → **Deepgram** Aura → **ElevenLabs**, tried in order with automatic fallback (custom `SyncProvider` for each) |
 | Frontend | React 19 + Vite + Tailwind v4, live progress over SSE |
 
 Every inference call now goes through a **single TokenRouter key** — image,
 video, critique, copy and voiceover. ElevenLabs remains wired as an optional
 voiceover backend but is no longer required.
 
-> **Why voiceover moved.** ElevenLabs' free tier is 10,000 characters/month; a
-> handful of campaigns exhaust it, after which every call returns
-> `auth_failure` and the audio track dies mid-run. TokenRouter's
-> `openai/gpt-audio-mini` produces 24 kHz MP3 that transcribes back verbatim,
-> with no second signup and no monthly cliff. Set
-> `FERNWOOD_TTS_PROVIDER=auto` to prefer ElevenLabs and fall back automatically.
+> **Why voiceover has three backends.** ElevenLabs' free tier is 10,000
+> characters/month; a handful of campaigns exhaust it, after which every call
+> returns `auth_failure` and the audio track dies mid-run — which is exactly
+> what happened during development. `FERNWOOD_TTS_PROVIDER=auto` now tries
+> TokenRouter, then Deepgram Aura, then ElevenLabs, falling through on **any**
+> failure, so no single vendor's quota can cost a campaign its voiceover.
+> Pinning an explicit backend disables fallback, so a misconfiguration surfaces
+> instead of being silently papered over.
 
 ### Two provider styles, chosen by the upstream API
 
@@ -76,7 +78,8 @@ npm run dev            # http://localhost:3000
 ```
 
 Copy `.env.example` → `.env` and fill in `TOKENROUTER_API_KEY` and your B2
-credentials. `ELEVENLABS_API_KEY` is optional — voiceover defaults to TokenRouter. Then check everything is wired:
+credentials. `DEEPGRAM_API_KEY` and `ELEVENLABS_API_KEY` are optional voiceover
+fallbacks; Deepgram also powers the audio-verification tests. Then check everything is wired:
 
 ```bash
 curl -s localhost:8787/api/health | python3 -m json.tool
@@ -120,14 +123,14 @@ it needs its own manifest rather than being overwritten.
 
 ```bash
 cd backend
-uv run pytest              # 250 offline tests — no keys, no network
-uv run pytest -m live      # 60 live tests against the real APIs
+uv run pytest              # 264 offline tests — no keys, no network
+uv run pytest -m live      # 62 live tests against the real APIs
 ```
 
 The live suite drives a complete campaign through the HTTP API exactly as the
 browser does, then asserts on what a judge would check: critique scores are real
 and varied (not canned), retry prompts carry the prior critique's feedback, the
-image decodes, the voiceover **transcribes back to the generated script**, and
+image decodes, the voiceover **transcribes back to the generated script** (via Deepgram STT, which returns the words and nothing else), and
 every manifest downloaded from B2 passes `Manifest.verify()`.
 
 See [backend/README.md](backend/README.md) for architecture, storage layout, and a list of upstream

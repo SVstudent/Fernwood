@@ -1,8 +1,8 @@
 # Fernwood backend
 
 Python sidecar that runs the real campaign pipeline. It exists because Genblaze
-is a Python SDK and because the TokenRouter / ElevenLabs / B2 credentials must
-never reach the browser.
+is a Python SDK and because the TokenRouter / Deepgram / ElevenLabs / B2
+credentials must never reach the browser.
 
 ## Run
 
@@ -26,7 +26,9 @@ its run.
 ## Configure
 
 Copy `.env.example` to `.env` at the **project root** and fill in
-`TOKENROUTER_API_KEY` and `ELEVENLABS_API_KEY`. `.env*` is already gitignored.
+`TOKENROUTER_API_KEY` plus your B2 credentials. `DEEPGRAM_API_KEY` and
+`ELEVENLABS_API_KEY` are optional voiceover fallbacks. `.env*` is already
+gitignored.
 
 Then sanity-check before demoing:
 
@@ -34,13 +36,11 @@ Then sanity-check before demoing:
 curl -s localhost:8787/api/health | python3 -m json.tool
 ```
 
-## Scripts
-
 ## Tests
 
 ```bash
-uv run pytest              # 190 offline tests — no keys, no network (~95s)
-uv run pytest -m live      # 46 live tests against real TokenRouter/ElevenLabs/B2 (~4min)
+uv run pytest              # 264 offline tests — no keys, no network
+uv run pytest -m live      # 62 live tests against real TokenRouter/Deepgram/B2 (~4min)
 ```
 
 Live tests are excluded by default (they cost money). They exist because the
@@ -53,7 +53,7 @@ Three live files matter most:
 | File | What it proves |
 |---|---|
 | `test_live_demo_path.py` | 26 assertions over **one real campaign** driven through the HTTP API exactly as the browser does: varied non-canned critique scores, retry prompts carrying prior feedback, decodable image, Range-served MP3, and manifests downloaded from B2 that pass `Manifest.verify()` |
-| `test_live_audio_content.py` | The voiceover **actually says the script** — transcribed with an audio-capable model and compared word-for-word (100% overlap observed). Plus duration, speaking rate, and a size-vs-duration check that catches truncation |
+| `test_live_audio_content.py` | The voiceover **actually says the script** — transcribed with Deepgram STT and compared word-for-word (100% overlap, 1.000 confidence observed). Plus duration, speaking rate, and a size-vs-duration check that catches truncation |
 | `test_live_integration.py` | Per-service contracts: model availability, the image size floor, and that the vision model returns non-empty structured JSON |
 
 `test_live_demo_path.py` deletes its campaign afterwards so runs don't pollute
@@ -65,6 +65,8 @@ A well-formed MP3 can be silence, a truncated buffer, or the wrong take. Audible
 playback could not be confirmed in an automated browser — media elements never
 load there, and a synthesized WAV control stalls identically — so the audio is
 verified by transcribing it and diffing against the generated script instead.
+
+## Scripts
 
 | Script | Needs keys? | What it proves |
 |---|---|---|
@@ -111,7 +113,8 @@ GET  /api/media/{key}          -> serves local bytes, or 307s to a presigned B2 
 GET  /api/health               -> key + model + storage status
 ```
 
-Per campaign, three sequential tracks (image → audio → copy). Each **attempt**
+Per campaign, three sequential tracks (image → audio → copy), plus an opt-in
+brand-film track. Each **attempt**
 is its own `Pipeline.run()` with a fresh `ObjectStorageSink`, chained to the
 previous attempt via `from_result()` so `parent_run_id` records the retry
 lineage. That gives one verifiable manifest per attempt — including the rejected
@@ -131,6 +134,26 @@ index/campaigns.json                                       # Library rollup
 bytes, and the sink-stored originals are exactly what the manifest's SHA-256
 digests commit to — overwriting them in place would invalidate the hash being
 embedded.
+
+### Voiceover: three backends, tried in order
+
+`FERNWOOD_TTS_PROVIDER=auto` runs **TokenRouter → Deepgram → ElevenLabs**,
+falling through on any failure.
+
+| Backend | Route | Notes |
+|---|---|---|
+| `tokenrouter` | `POST /v1/chat/completions` with `modalities:["text","audio"]` | `openai/gpt-audio-mini`. There is **no** `/v1/audio/speech` — `tts-1` and `gpt-4o-mini-tts` return 503 model_not_found. `openai/gpt-audio` (non-mini) rejects non-streaming audio with "requires stream: true". |
+| `deepgram` | `POST /v1/speak?model=<voice>&encoding=mp3` | Aura. The `model` **is** the voice (`aura-2-thalia-en`). Returns `audio/mpeg` bytes directly. |
+| `elevenlabs` | genblaze's native `ElevenLabsTTSProvider` | Last resort: free tier is 10k chars/month and returns `auth_failure` once spent. |
+
+Naming a backend explicitly disables fallback, so a misconfiguration fails
+loudly instead of being silently substituted.
+
+`app/providers/deepgram_tts.py` also exposes `transcribe()` (Deepgram STT,
+nova-3). The audio-verification tests use it because a purpose-built ASR returns
+the spoken words and nothing else — an audio *chat* model prepends commentary
+("Here it is, verbatim:") and mis-hears proper nouns, which made those tests
+flaky. Observed confidence: 1.000, 100% word overlap.
 
 ### Brand film (opt-in, `includeVideo: true`)
 
