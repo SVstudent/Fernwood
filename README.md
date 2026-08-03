@@ -12,6 +12,7 @@ manifest stored in Backblaze B2.
 Then the **Campaign Brain** reads that archive back, and the next campaign for the same brand
 starts knowing what the last one got wrong.
 
+HERE IS THE LIVE APP: **https://fernwood-livid.vercel.app/**
 ## The Campaign Brain
 
 Fernwood already stored every rejected attempt alongside the structured critique that rejected it.
