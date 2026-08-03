@@ -29,6 +29,26 @@ import {
 // entirely if SSE ever misbehaves through it.
 const API_BASE: string = (import.meta as any).env?.VITE_API_BASE ?? '';
 
+/**
+ * Resolve a stored media path against the API host.
+ *
+ * Asset URLs are persisted in campaign.json as ROOT-RELATIVE paths
+ * (`/api/media/campaigns/...`), which is correct in development where Vite
+ * proxies /api to the backend. In production the frontend is served from
+ * Vercel, so the same path resolves against Vercel — which has no such route,
+ * and every image, audio player and video silently 404s while the rest of the
+ * page looks fine.
+ *
+ * fetch() calls already prepend API_BASE; these URLs go straight into `src`
+ * attributes, so they need the same treatment. Absolute URLs are returned
+ * untouched so presigned B2 links keep working.
+ */
+export function mediaUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
+  return url.startsWith('/') ? `${API_BASE}${url}` : url;
+}
+
 export type OnLogCallback = (log: PipelineStageLog) => void;
 export type OnCampaignUpdateCallback = (campaign: Campaign) => void;
 export type OnBrainUpdateCallback = (snapshot: BrainSnapshot) => void;

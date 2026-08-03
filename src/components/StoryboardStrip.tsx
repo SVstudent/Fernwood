@@ -1,6 +1,7 @@
 import React from 'react';
 import { Film, Clock, Volume2, Layers, AlertTriangle } from 'lucide-react';
 import { AdShot, AttemptContent } from '../types';
+import { mediaUrl } from '../services/pipelineService';
 
 /**
  * The shot breakdown of the assembled advertisement.
@@ -109,7 +110,7 @@ const ShotCard: React.FC<{ shot: AdShot }> = ({ shot }) => {
       <div className="relative aspect-video bg-stone-200">
         {shot.frameUrl && !failed ? (
           <img
-            src={shot.frameUrl}
+            src={mediaUrl(shot.frameUrl)}
             alt={`Shot ${shot.index + 1}: ${shot.title}`}
             className="h-full w-full object-cover"
             loading="lazy"

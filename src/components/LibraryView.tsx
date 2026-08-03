@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Campaign } from '../types';
+import { mediaUrl } from '../services/pipelineService';
 import { 
   Search, 
   Filter, 
@@ -150,7 +151,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 <div className="relative aspect-video bg-stone-900 overflow-hidden">
                   {approvedAttempt?.content.imageUrl ? (
                     <img
-                      src={approvedAttempt.content.imageUrl}
+                      src={mediaUrl(approvedAttempt.content.imageUrl)}
                       alt={camp.brandName}
                       className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-103"
                     />

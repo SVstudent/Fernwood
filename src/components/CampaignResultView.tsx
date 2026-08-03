@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Campaign } from '../types';
+import { mediaUrl } from '../services/pipelineService';
 import { AudioPlayerMock } from './AudioPlayerMock';
 import { ProvenanceLog } from './ProvenanceLog';
 import { StoryboardStrip } from './StoryboardStrip';
@@ -306,7 +307,7 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
             {/* Poster Image Container */}
             <div className="relative rounded-xl overflow-hidden border border-stone-200/80 bg-stone-900 aspect-video shadow-inner group">
               <img
-                src={approvedImgAttempt?.content.imageUrl}
+                src={mediaUrl(approvedImgAttempt?.content.imageUrl)}
                 alt={campaign.brandName}
                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-102"
               />
@@ -349,8 +350,8 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
               </div>
 
               <video
-                src={approvedVidAttempt.content.videoUrl}
-                poster={approvedVidAttempt.content.videoPosterUrl}
+                src={mediaUrl(approvedVidAttempt.content.videoUrl)}
+                poster={mediaUrl(approvedVidAttempt.content.videoPosterUrl)}
                 controls
                 loop
                 playsInline
@@ -388,7 +389,7 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
               durationSeconds={approvedAudAttempt.content.durationSeconds || 8.5}
               waveformData={approvedAudAttempt.content.audioWaveformData}
               modelName={approvedAudAttempt.modelName}
-              audioUrl={approvedAudAttempt.content.audioUrl}
+              audioUrl={mediaUrl(approvedAudAttempt.content.audioUrl)}
             />
           )}
 
@@ -575,7 +576,7 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
         >
           <div className="max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-stone-900 p-2 shadow-2xl">
             <img
-              src={approvedImgAttempt?.content.imageUrl}
+              src={mediaUrl(approvedImgAttempt?.content.imageUrl)}
               alt={campaign.brandName}
               className="w-full h-auto max-h-[85vh] object-contain rounded-xl"
             />
