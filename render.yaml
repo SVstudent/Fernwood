@@ -31,8 +31,10 @@ services:
         value: b2
       - key: B2_BUCKET
         value: fernwood-campaigns
+      # Must match the region the bucket was actually created in — a mismatch
+      # authenticates fine and then 404s on every object.
       - key: B2_REGION
-        value: us-west-004
+        value: us-east-005
       - key: B2_KEY_ID
         sync: false
       - key: B2_APP_KEY
