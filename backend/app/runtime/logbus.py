@@ -62,6 +62,19 @@ class Emitter:
     def campaign(self, campaign: Campaign) -> None:
         REGISTRY.publish(self.campaign_id, "campaign", campaign.ts())
 
+    def brain(self, snapshot) -> None:
+        """Publish the Campaign Brain's current state on its own SSE channel.
+
+        A separate event name rather than another `log` frame: the brain view
+        renders a live lobe graph that needs the WHOLE snapshot each time, while
+        the pipeline log is an append-only feed. Overloading one channel would
+        force the client to reconstruct brain state by replaying log entries.
+
+        Clients that predate this event ignore unknown SSE event names, so the
+        existing frontend keeps working untouched.
+        """
+        REGISTRY.publish(self.campaign_id, "brain", snapshot.ts())
+
     def done(self, campaign: Campaign) -> None:
         REGISTRY.publish(
             self.campaign_id, "done", {"status": campaign.status, "campaign": campaign.ts()}

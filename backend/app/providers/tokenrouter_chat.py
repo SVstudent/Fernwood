@@ -36,8 +36,8 @@ from genblaze_core.models.step import Step
 from genblaze_core.providers import SyncProvider
 from genblaze_openai import chat
 
-from app.config import SCRATCH_DIR
-from app.providers.client import NO_TEMPERATURE_PREFIXES, tokenrouter_client
+from app.config import SCRATCH_DIR, get_settings
+from app.providers.client import NO_TEMPERATURE_PREFIXES, tokenrouter_chat_client
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +61,16 @@ class TokenRouterChatStep(SyncProvider):
         messages = params.get("messages")
 
         kwargs: dict[str, Any] = {
-            "client": tokenrouter_client(),
-            "timeout": params.get("request_timeout", 90.0),
+            # Retry-free client: our pacing layer and the caller's
+            # response_format ladder are the retry policy. See
+            # tokenrouter_chat_client() for why SDK retries are actively harmful
+            # on a slow, rate-limited free tier.
+            "client": tokenrouter_chat_client(),
+            # Default comes from settings, not a literal: the free text tier is
+            # slow enough that a 90s default silently failed copy generation,
+            # text critique and the brain lobes in three different-looking ways.
+            "timeout": params.get("request_timeout")
+            or get_settings().fernwood_text_request_timeout,
         }
         for key in ("temperature", "max_tokens", "response_format"):
             if params.get(key) is not None:
@@ -76,10 +84,7 @@ class TokenRouterChatStep(SyncProvider):
             kwargs["system"] = params["system"]
 
         try:
-            if messages:
-                resp = chat(step.model, messages, **kwargs)
-            else:
-                resp = chat(step.model, prompt=step.prompt or "", **kwargs)
+            resp = _call_with_pacing(step, messages, kwargs)
         except ProviderError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -118,6 +123,57 @@ class TokenRouterChatStep(SyncProvider):
         step.metadata["tokens_out"] = resp.tokens_out or 0
         step.metadata["local_path"] = str(out)
         return step
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "429" in text or "rate limit" in text or "request limit" in text
+
+
+def _call_with_pacing(step: Step, messages: Any, kwargs: dict[str, Any]) -> Any:
+    """Send the request, paced under any free-tier request cap.
+
+    Free models (kimi-k3-free allows 8/min) are throttled BEFORE sending. The
+    retry loop is the backstop for the pacing being slightly out of phase with
+    the server's own window — without it, a single stray 429 would collapse the
+    caller's response_format ladder, since a rejected request is indistinguishable
+    from a malformed response to the layer above.
+    """
+    from app.config import get_settings
+    from app.providers.ratelimit import is_free_tier, limiter_for
+
+    settings = get_settings()
+    limiter = (
+        limiter_for(step.model, settings.fernwood_free_tier_rpm)
+        if is_free_tier(step.model)
+        else None
+    )
+
+    attempts = max(1, settings.fernwood_rate_limit_retries) if limiter else 1
+    last: Exception | None = None
+
+    for attempt in range(attempts):
+        if limiter is not None:
+            limiter.acquire()
+        try:
+            if messages:
+                return chat(step.model, messages, **kwargs)
+            return chat(step.model, prompt=step.prompt or "", **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            if limiter is None or not _is_rate_limit(exc) or attempt == attempts - 1:
+                raise
+            last = exc
+            # The upstream has already refused, so treat the window as spent
+            # rather than trusting our own count of it.
+            limiter.note_rejection()
+            logger.warning(
+                "rate limited on %s (attempt %d/%d); backing off",
+                step.model,
+                attempt + 1,
+                attempts,
+            )
+
+    raise last or RuntimeError("unreachable")
 
 
 def _classify_chat_error(exc: Exception) -> ProviderErrorCode:

@@ -36,6 +36,191 @@ export interface CritiqueResult {
   criteria: CritiqueCriterion[];
   reasoning: string;
   suggestedFixes: string;
+  /**
+   * The score the critic actually returned, before FERNWOOD_FORCE_FIRST_RETRY
+   * capped it to guarantee a visible retry. Present only when that cap fired.
+   * The Campaign Brain's improvement metric prefers this over overallScore.
+   */
+  preCapScore?: number;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Campaign Brain
+ *
+ * Per-brand persistent intelligence. Mirrors backend/app/brain/models.py field
+ * for field — that file is the other half of this contract.
+ * ------------------------------------------------------------------------ */
+
+export type LawCategory = 'visual' | 'voice' | 'copy' | 'audience' | 'strategy';
+export type LobeId = 'recall' | 'strategy' | 'foresight' | 'audience' | 'learning';
+export type LobeStatus = 'idle' | 'firing' | 'done' | 'skipped';
+
+/** One durable rule this brand's own rejected work taught the brain. */
+export interface BrandLaw {
+  id: string;
+  text: string;
+  category: LawCategory;
+  source: 'critique' | 'audience' | 'seed';
+  confidence: number;
+  /** The critique or objection that produced it. A law is a citation, not an opinion. */
+  evidence: string;
+  learnedFromCampaignId: string;
+  learnedFromAttemptId?: string;
+  learnedAt: string;
+  /** Bumped when a later campaign independently rediscovers the same lesson. */
+  reinforcedCount: number;
+}
+
+export interface Persona {
+  id: string;
+  name: string;
+  age: number;
+  occupation: string;
+  location: string;
+  mindset: string;
+  skepticism: number;
+  mediaDiet: string;
+}
+
+export interface PersonaReaction {
+  personaId: string;
+  personaName: string;
+  sentiment: number;
+  verdict: 'loves' | 'likes' | 'indifferent' | 'dislikes';
+  /** What this person would actually say to a friend about the ad. */
+  quote: string;
+  objection: string;
+  wouldAct: number;
+  attentionSeconds: number;
+}
+
+export interface AudienceReport {
+  personas: Persona[];
+  reactions: PersonaReaction[];
+  resonanceScore: number;
+  consensus: string;
+  topObjection: string;
+  /** Population std-dev of sentiment: is the panel split, or merely lukewarm? */
+  polarization: number;
+  /** On-the-record statement of what the panel actually read. */
+  basis: string;
+}
+
+export interface CampaignStrategy {
+  bigIdea: string;
+  positioning: string;
+  visualDirection: string;
+  voiceDirection: string;
+  copyAngle: string;
+  avoid: string[];
+  lawsApplied: string[];
+}
+
+export interface Foresight {
+  predictedScore: number;
+  predictedRetries: number;
+  likelyFailureMode: string;
+  confidence: number;
+  rationale: string;
+  actualScore?: number;
+  actualRetries?: number;
+  calibrationError?: number;
+}
+
+export interface LearningDelta {
+  lawsAdded: BrandLaw[];
+  lawsReinforced: string[];
+  summary: string;
+  versionBefore: number;
+  versionAfter: number;
+}
+
+export interface RunRecord {
+  campaignId: string;
+  brandName: string;
+  createdAt: string;
+  brainVersionAtRun: number;
+  lawsAvailable: number;
+  totalAttempts: number;
+  retryCount: number;
+  /** The headline learning signal: how good the opening shot was, pre-critique. */
+  firstAttemptAvgScore: number;
+  finalQualityScore: number;
+  resonanceScore?: number;
+  predictedScore?: number;
+  calibrationError?: number;
+  forcedFirstRetry: boolean;
+}
+
+export interface ImprovementDelta {
+  hasBaseline: boolean;
+  runs: number;
+  baseline?: RunRecord;
+  latest?: RunRecord;
+  firstAttemptScoreDelta: number;
+  /** Negative is better — fewer retries to reach shippable work. */
+  retryDelta: number;
+  qualityDelta: number;
+  resonanceDelta?: number;
+  lawsDelta: number;
+  summary: string;
+  /** Set when the two compared runs were not measured under equal conditions. */
+  caveat: string;
+}
+
+/** The persistent brain for one brand. brains/{slug}/brain.json in B2. */
+export interface BrainState {
+  brandSlug: string;
+  brandName: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  laws: BrandLaw[];
+  personas: Persona[];
+  history: RunRecord[];
+  lifetimeCampaigns: number;
+}
+
+/** What one campaign's brain knew, decided and learned. Embedded in campaign.json. */
+export interface BrainSnapshot {
+  brandSlug: string;
+  brandName: string;
+  coldStart: boolean;
+  brainVersionBefore: number;
+  brainVersionAfter: number;
+  lawsApplied: BrandLaw[];
+  strategy?: CampaignStrategy;
+  foresight?: Foresight;
+  audience?: AudienceReport;
+  learning?: LearningDelta;
+  improvement?: ImprovementDelta;
+  lobes: Record<string, LobeStatus>;
+  /** Manifest hash per lobe — the brain's own reasoning is provenance-tracked. */
+  lobeManifests: Record<string, string>;
+  modelUsed: string;
+}
+
+export type ShotRole = 'hook' | 'product' | 'benefit' | 'cta';
+
+/**
+ * One shot of the assembled advertisement.
+ *
+ * A shot is not a re-crop of the key visual: it has its own generated first
+ * frame, its own camera move and its own line of narration, so the finished
+ * film cuts between real scenes the way an ad does.
+ */
+export interface AdShot {
+  index: number;
+  role: ShotRole;
+  title: string;
+  scenePrompt: string;
+  motionPrompt: string;
+  durationSeconds: number;
+  voiceoverLine?: string;
+  frameUrl?: string;
+  clipUrl?: string;
+  manifestHash?: string;
+  status: 'pending' | 'rendered' | 'failed';
 }
 
 export interface AttemptContent {
@@ -51,10 +236,15 @@ export interface AttemptContent {
   audioWaveformData?: number[];
   audioUrl?: string; // real ElevenLabs mp3, served from B2 via /api/media
 
-  // For Video (brand film animated from the approved key visual)
+  // For Video (a cut advertisement, not a single still in motion)
   videoUrl?: string;
   videoPosterUrl?: string;
   videoDurationSeconds?: number;
+  /** Full shot breakdown of the assembled advertisement. */
+  adShots?: AdShot[];
+  shotCount?: number;
+  hasVoiceover?: boolean;
+  hasEndCard?: boolean;
   
   // For Marketing Copy
   headline?: string;
@@ -135,6 +325,8 @@ export interface Campaign {
   overallQualityScore: number;
   totalAttemptsCount: number;
   retryCount: number;
+  /** What this brand's Campaign Brain knew, decided and learned on this run. */
+  brain?: BrainSnapshot;
 }
 
 export type PipelineStageId =

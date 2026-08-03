@@ -15,7 +15,14 @@
  * and `Campaign` shapes declared in ../types, so no component had to change.
  */
 
-import { Campaign, CampaignBrief, PipelineStageLog } from '../types';
+import {
+  BrainSnapshot,
+  BrainState,
+  Campaign,
+  CampaignBrief,
+  ImprovementDelta,
+  PipelineStageLog,
+} from '../types';
 
 // Empty string -> same-origin, proxied to the backend by vite.config.ts.
 // Set VITE_API_BASE (e.g. http://127.0.0.1:8787) to bypass the dev proxy
@@ -24,6 +31,7 @@ const API_BASE: string = (import.meta as any).env?.VITE_API_BASE ?? '';
 
 export type OnLogCallback = (log: PipelineStageLog) => void;
 export type OnCampaignUpdateCallback = (campaign: Campaign) => void;
+export type OnBrainUpdateCallback = (snapshot: BrainSnapshot) => void;
 
 export class PipelineError extends Error {}
 
@@ -38,7 +46,8 @@ export class PipelineError extends Error {}
 export async function executeFullCampaignPipeline(
   brief: CampaignBrief,
   onLog: OnLogCallback,
-  onCampaignUpdate: OnCampaignUpdateCallback
+  onCampaignUpdate: OnCampaignUpdateCallback,
+  onBrainUpdate?: OnBrainUpdateCallback
 ): Promise<Campaign> {
   let res: Response;
   try {
@@ -84,6 +93,16 @@ export async function executeFullCampaignPipeline(
       const ev = e as MessageEvent;
       if (ev.lastEventId) lastSeq = Number(ev.lastEventId);
       onCampaignUpdate(JSON.parse(ev.data) as Campaign);
+    });
+
+    // The Campaign Brain streams its whole snapshot on its own event name, not
+    // as another log frame: the lobe graph needs complete state on every tick,
+    // while the log is an append-only feed. Unknown event names are ignored by
+    // EventSource, so a backend without the brain simply never fires this.
+    es.addEventListener('brain', (e) => {
+      const ev = e as MessageEvent;
+      if (ev.lastEventId) lastSeq = Number(ev.lastEventId);
+      onBrainUpdate?.(JSON.parse(ev.data) as BrainSnapshot);
     });
 
     es.addEventListener('done', (e) => {
@@ -139,6 +158,56 @@ export async function deleteCampaignRemote(campaignId: string): Promise<void> {
     await fetch(`${API_BASE}/api/campaigns/${campaignId}`, { method: 'DELETE' });
   } catch {
     /* local state is updated regardless */
+  }
+}
+
+export interface BrainResponse {
+  brain: BrainState;
+  improvement: ImprovementDelta;
+  model: string;
+  slug?: string;
+}
+
+/**
+ * Load a brand's persistent brain.
+ *
+ * Keyed by brand NAME rather than slug so a caller only needs what it already
+ * has from the campaign; the backend slugifies. Returns 200 with an empty brain
+ * for an unknown brand — a cold start is the normal first case, not an error.
+ */
+export async function fetchBrainByBrand(brandName: string): Promise<BrainResponse | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/brain/by-brand/${encodeURIComponent(brandName)}`);
+    return res.ok ? ((await res.json()) as BrainResponse) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every brand brain in storage, newest first. */
+export async function fetchBrains(): Promise<BrainState[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/brains`);
+    if (!res.ok) return [];
+    const { brains } = await res.json();
+    return (brains ?? []) as BrainState[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Wipe a brand's learned memory so the next run is a true cold start.
+ * Exists for the cold-vs-warm demo; versioned snapshots in storage survive.
+ */
+export async function resetBrain(slug: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/api/brain/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

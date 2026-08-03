@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import campaigns, health, media, stream
+from app.api import brain, campaigns, health, media, stream
 from app.providers.client import probe_models
 from app.runtime.registry import REGISTRY
 
@@ -59,3 +59,4 @@ app.include_router(health.router, prefix="/api")
 app.include_router(campaigns.router, prefix="/api")
 app.include_router(stream.router, prefix="/api")
 app.include_router(media.router, prefix="/api")
+app.include_router(brain.router, prefix="/api")

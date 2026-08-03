@@ -43,6 +43,10 @@ async def health() -> dict:
             "imageModel": Resolved.image_model,
             "visionModel": Resolved.vision_model,
             "chatModel": Resolved.chat_model,
+            # Carries copy, voiceover scripts, text critique and all five brain
+            # lobes. Surfaced separately so a demo check can confirm the free
+            # Kimi tier actually resolved rather than silently falling back.
+            "textModel": Resolved.text_model,
         },
         "voiceover": {
             "provider": s.fernwood_tts_provider,

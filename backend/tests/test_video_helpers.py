@@ -15,7 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from app.pipeline.tracks import _probe_video_duration
+# Moved to app/pipeline/assemble.py when the single-still film track was
+# replaced by the multi-shot advertisement pipeline. Same parser, same bug
+# it guards against.
+from app.pipeline.assemble import (
+    probe_duration_from_container as _probe_video_duration,
+)
 
 
 def _mvhd(version: int, timescale: int, duration: int) -> bytes:

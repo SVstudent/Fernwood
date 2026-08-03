@@ -1,9 +1,11 @@
 import React from 'react';
-import { Sparkles, Library, PlusCircle, ShieldCheck, Database, Layers } from 'lucide-react';
+import { Sparkles, Library, PlusCircle, ShieldCheck, Database, Layers, BrainCircuit } from 'lucide-react';
+
+type View = 'brief' | 'pipeline' | 'result' | 'library' | 'brain';
 
 interface HeaderProps {
-  currentView: 'brief' | 'pipeline' | 'result' | 'library';
-  onNavigate: (view: 'brief' | 'pipeline' | 'result' | 'library') => void;
+  currentView: View;
+  onNavigate: (view: View) => void;
   campaignCount: number;
   hasActiveResult: boolean;
 }
@@ -35,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
             <p className="text-xs text-stone-500 font-sans">
-              AI Brand Campaign Engine with Self-Critique & Retry
+              AI Brand Campaign Engine with Self-Critique, Retry & Campaign Brain
             </p>
           </div>
         </div>
@@ -68,6 +70,20 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
               <span>Current Kit</span>
+            </button>
+          )}
+
+          {hasActiveResult && (
+            <button
+              onClick={() => onNavigate('brain')}
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
+                currentView === 'brain'
+                  ? 'bg-white text-stone-900 shadow-xs border border-stone-200'
+                  : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/50'
+              }`}
+            >
+              <BrainCircuit className="h-3.5 w-3.5 text-violet-600" />
+              <span>Campaign Brain</span>
             </button>
           )}
 

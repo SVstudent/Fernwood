@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from app.brain.models import CampaignStrategy
 from app.domain.models import CampaignBrief, CritiqueResult
 
 # The scoring guidance and the pass threshold MUST agree. An earlier version
@@ -133,6 +134,45 @@ def _tone(brief: CampaignBrief) -> str:
     return ", ".join(brief.tone_tags) if brief.tone_tags else "Modern"
 
 
+def _strategy_block(
+    strategy: CampaignStrategy | None, direction_field: str, *, for_image: bool = False
+) -> str:
+    """Inject the Campaign Brain's strategy into a generation prompt.
+
+    This is what makes the three tracks one campaign instead of three unrelated
+    assets: they never see each other's output, so the shared big idea and the
+    shared avoid-list are the only things holding them together.
+
+    The `avoid` list matters as much as the direction. It is where the brand's
+    accumulated laws actually bite — a rule learned from campaign #1's rejected
+    image only changes anything if it reaches campaign #7's prompt.
+    """
+    if strategy is None:
+        return ""
+
+    direction = getattr(strategy, direction_field, "") or ""
+    parts = ["CAMPAIGN STRATEGY (from the brand's Campaign Brain)"]
+    if strategy.big_idea:
+        parts.append(f"Big idea: {strategy.big_idea}")
+    if direction:
+        parts.append(f"Direction for this asset: {direction}")
+    if strategy.avoid:
+        parts.append(
+            "Do NOT do any of the following — these are rules this brand's own "
+            "past rejections established: " + "; ".join(strategy.avoid)
+        )
+
+    block = "\n".join(parts)
+    # Image models letter hex codes and the word "swatch" straight into the
+    # frame, and strategy text is free-form model output that may contain both.
+    if for_image:
+        block = sanitize_for_image_prompt(block)
+    # Separator added AFTER sanitizing: sanitize_for_image_prompt() ends in
+    # .strip(), so leading newlines baked into the block would be eaten and the
+    # heading would run straight into the previous sentence.
+    return f"\n\n{block}"
+
+
 _HEX_RE = re.compile(r"#?\b[0-9A-Fa-f]{6}\b")
 _SWATCH_RE = re.compile(
     r"\b(palette strip|colour strip|color strip|swatch(?:es)?|colour chip|color chip|"
@@ -164,7 +204,10 @@ def sanitize_for_image_prompt(text: str) -> str:
 
 
 def build_image_prompt(
-    brief: CampaignBrief, attempt: int, critique: CritiqueResult | None
+    brief: CampaignBrief,
+    attempt: int,
+    critique: CritiqueResult | None,
+    strategy: CampaignStrategy | None = None,
 ) -> str:
     base = (
         f"Premium commercial brand key visual for {brief.brand_name} — "
@@ -183,6 +226,7 @@ def build_image_prompt(
     )
     if brief.brief_text.strip():
         base += f" Creative direction: {brief.brief_text.strip()}"
+    base += _strategy_block(strategy, "visual_direction", for_image=True)
     if attempt > 1 and critique is not None:
         # This is the retry loop made visible — the art director's notes go
         # straight back into the generation prompt, sanitized so hex codes and
@@ -200,7 +244,10 @@ def build_image_prompt(
 
 
 def build_copy_prompt(
-    brief: CampaignBrief, attempt: int, critique: CritiqueResult | None
+    brief: CampaignBrief,
+    attempt: int,
+    critique: CritiqueResult | None,
+    strategy: CampaignStrategy | None = None,
 ) -> str:
     base = (
         f"Write a marketing copy suite for {brief.brand_name}, which offers "
@@ -210,6 +257,7 @@ def build_copy_prompt(
         "Avoid generic startup buzzwords (revolutionary, game-changing, seamless, "
         "elevate, unlock). Write like a real brand with a point of view."
     )
+    base += _strategy_block(strategy, "copy_angle")
     if attempt > 1 and critique is not None:
         base += (
             f"\n\nREVISION {attempt} — the previous copy scored "
@@ -219,7 +267,10 @@ def build_copy_prompt(
 
 
 def build_voiceover_prompt(
-    brief: CampaignBrief, attempt: int, critique: CritiqueResult | None
+    brief: CampaignBrief,
+    attempt: int,
+    critique: CritiqueResult | None,
+    strategy: CampaignStrategy | None = None,
 ) -> str:
     base = (
         f"Write a spoken voiceover script for a short {brief.brand_name} brand film. "
@@ -229,6 +280,7 @@ def build_voiceover_prompt(
         "rather than the page. No stage directions, no speaker labels. "
         "Also describe the ideal voice in a short phrase."
     )
+    base += _strategy_block(strategy, "voice_direction")
     if attempt > 1 and critique is not None:
         base += (
             f"\n\nREVISION {attempt} — previous script scored "
@@ -237,13 +289,25 @@ def build_voiceover_prompt(
     return base
 
 
-def build_video_prompt(brief: CampaignBrief) -> str:
+def build_video_prompt(
+    brief: CampaignBrief, strategy: CampaignStrategy | None = None
+) -> str:
     """Motion direction for animating the approved key visual.
 
     The still already carries the approved composition and palette, so this
     describes CAMERA and MOTION only. Asking for new subject matter would let
     the model redraw the scene and discard what passed critique.
+
+    The strategy's big idea is passed as MOOD only, for the same reason: the
+    frame it animates already passed critique, and re-describing the scene from
+    strategy would invite the model to redraw it.
     """
+    mood = ""
+    if strategy is not None and strategy.big_idea:
+        mood = sanitize_for_image_prompt(
+            f" The campaign's big idea, for emotional register only — do not "
+            f"add or change any objects to express it: {strategy.big_idea}"
+        )
     return (
         f"Cinematic brand film for {brief.brand_name} — {brief.product_service}. "
         f"Mood: {_tone(brief)}. "
@@ -253,6 +317,7 @@ def build_video_prompt(brief: CampaignBrief) -> str:
         "they are — do not add, remove or redesign any objects. "
         "No text, lettering, captions, logos or watermarks. "
         "Steady camera, no whip pans, no fast cuts, no people entering frame."
+        + mood
     )
 
 

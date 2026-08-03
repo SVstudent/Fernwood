@@ -7,9 +7,11 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from app.brain.runner import BrainRun
 from app.domain.models import Campaign, CampaignAssets, CampaignBrief
 from app.config import get_settings
-from app.pipeline.tracks import run_track, run_video_track
+from app.pipeline.ad import run_ad_track
+from app.pipeline.tracks import run_track
 from app.runtime.logbus import Emitter, now_iso
 from app.storage.index import save_campaign
 
@@ -115,19 +117,41 @@ def run_campaign(campaign: Campaign, brief: CampaignBrief) -> Campaign:
             f"Target tone: {', '.join(brief.tone_tags) or 'Modern'}.",
         )
 
+        # The Campaign Brain runs BEFORE any generation quota is spent: it
+        # recalls what this brand's past rejections taught it, turns that into
+        # one strategy the three tracks share, and commits to a prediction it
+        # will be scored against afterwards. Never raises; a skipped brain
+        # yields strategy=None and the tracks behave exactly as they did before
+        # this existed.
+        brain_run = BrainRun(brief, campaign.id, emit)
+        strategy = brain_run.preflight()
+        if brain_run.snapshot.brand_slug:
+            campaign.brain = brain_run.snapshot.ts()
+            emit.campaign(campaign)
+
         for asset_type in ("image", "audio", "copy"):
-            asset = run_track(asset_type, brief, campaign.id, emit)
+            asset = run_track(asset_type, brief, campaign.id, emit, strategy)
             setattr(campaign.assets, asset_type, asset)
             campaign.total_attempts_count += len(asset.attempts)
             campaign.retry_count += max(0, len(asset.attempts) - 1)
             campaign.updated_at = now_iso()
             emit.campaign(campaign)
 
-        # Video runs last and only on request: it is derived from the approved
-        # key visual, and it adds ~2 minutes plus real quota per campaign.
+        # The advertisement runs last and only on request. It needs the other
+        # three tracks finished, not just the image: the storyboard is written
+        # against the approved voiceover script, and the end card carries the
+        # approved headline and CTA. It also costs a frame plus a clip per shot.
         settings = get_settings()
         if brief.include_video and settings.fernwood_enable_video:
-            video_asset = run_video_track(brief, campaign.id, emit, campaign.assets.image)
+            video_asset = run_ad_track(
+                brief,
+                campaign.id,
+                emit,
+                campaign.assets.image,
+                campaign.assets.audio,
+                campaign.assets.copy,
+                strategy,
+            )
             if video_asset is not None:
                 campaign.assets.video = video_asset
                 campaign.total_attempts_count += len(video_asset.attempts)
@@ -174,6 +198,16 @@ def run_campaign(campaign: Campaign, brief: CampaignBrief) -> Campaign:
         )
         campaign.status = "failed" if produced_nothing else "completed"
         campaign.updated_at = now_iso()
+
+        # Reflection runs once the campaign's own numbers are final: the
+        # audience panel needs the approved assets, and the brain's run record
+        # commits the real quality score and retry count to history. Whatever
+        # it learns here is what the NEXT campaign for this brand starts with.
+        snapshot = brain_run.reflect(campaign)
+        if snapshot is not None:
+            campaign.brain = snapshot.ts()
+            campaign.updated_at = now_iso()
+
         save_campaign(campaign)
 
         emit.success(

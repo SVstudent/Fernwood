@@ -166,10 +166,19 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                     <span className="text-[10px] text-stone-400">/100</span>
                   </div>
 
+                  {/* "Retries" is a count, not a verdict. The old label read
+                      "N Retries Passed", which asserted a pass even when an
+                      asset never cleared the threshold — contradicting the
+                      campaign's own status on the page it links to. */}
                   {camp.retryCount > 0 && (
-                    <div className="absolute bottom-3 left-3 bg-amber-500 text-white px-2 py-0.5 rounded-md text-[10px] font-bold font-mono shadow-xs flex items-center gap-1">
+                    <div
+                      className="absolute bottom-3 left-3 bg-amber-500 text-white px-2 py-0.5 rounded-md text-[10px] font-bold font-mono shadow-xs flex items-center gap-1"
+                      title="Attempts the critique loop rejected and regenerated"
+                    >
                       <RefreshCw className="h-3 w-3" />
-                      <span>{camp.retryCount} Retries Passed</span>
+                      <span>
+                        {camp.retryCount} {camp.retryCount === 1 ? 'Retry' : 'Retries'}
+                      </span>
                     </div>
                   )}
                 </div>

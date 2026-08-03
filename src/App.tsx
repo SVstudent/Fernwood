@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Campaign, CampaignBrief, PipelineStageLog } from './types';
+import { BrainSnapshot, Campaign, CampaignBrief, PipelineStageLog } from './types';
 import { PRESEEDED_CAMPAIGNS } from './data/preseededCampaigns';
 import { Header } from './components/Header';
 import { BriefInputView } from './components/BriefInputView';
 import { PipelineRunView } from './components/PipelineRunView';
 import { CampaignResultView } from './components/CampaignResultView';
 import { LibraryView } from './components/LibraryView';
+import { BrainView } from './components/BrainView';
 import {
   executeFullCampaignPipeline,
   listCampaigns,
@@ -14,12 +15,17 @@ import {
 
 export default function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>(PRESEEDED_CAMPAIGNS);
-  const [currentView, setCurrentView] = useState<'library' | 'brief' | 'pipeline' | 'result'>('library');
+  const [currentView, setCurrentView] = useState<
+    'library' | 'brief' | 'pipeline' | 'result' | 'brain'
+  >('library');
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(PRESEEDED_CAMPAIGNS[0]);
   const [pipelineLogs, setPipelineLogs] = useState<PipelineStageLog[]>([]);
   const [isPipelinePaused, setIsPipelinePaused] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [isLibraryLoading, setIsLibraryLoading] = useState(true);
+  // Streamed separately from the campaign so the lobe graph animates during the
+  // run, before the finished snapshot is written onto the campaign itself.
+  const [liveBrain, setLiveBrain] = useState<BrainSnapshot | null>(null);
 
   // Hydrate the library from Backblaze B2 (via the backend). Falls back to the
   // preseeded sample campaigns when storage is empty or unreachable, so the
@@ -46,6 +52,7 @@ export default function App() {
     setPipelineLogs([]);
     setIsPipelinePaused(false);
     setPipelineError(null);
+    setLiveBrain(null);
 
     try {
       const finalCampaign = await executeFullCampaignPipeline(
@@ -55,6 +62,9 @@ export default function App() {
         },
         (updatedCampaign) => {
           setActiveCampaign(updatedCampaign);
+        },
+        (snapshot) => {
+          setLiveBrain(snapshot);
         }
       );
 
@@ -140,6 +150,7 @@ export default function App() {
               isPaused={isPipelinePaused}
               onTogglePause={() => setIsPipelinePaused(!isPipelinePaused)}
               onViewResult={() => setCurrentView('result')}
+              brain={liveBrain ?? activeCampaign?.brain ?? null}
             />
           )}
 
@@ -148,6 +159,20 @@ export default function App() {
               campaign={activeCampaign}
               onBackToLibrary={() => setCurrentView('library')}
               onReRunBrief={() => setCurrentView('brief')}
+              onViewBrain={() => setCurrentView('brain')}
+            />
+          )}
+
+          {currentView === 'brain' && (
+            // The live snapshot outranks the campaign's stored one: mid-run it
+            // is the only thing that has the lobes' current state.
+            <BrainView
+              campaign={
+                liveBrain && activeCampaign
+                  ? { ...activeCampaign, brain: liveBrain }
+                  : activeCampaign
+              }
+              onBackToLibrary={() => setCurrentView('library')}
             />
           )}
         </main>

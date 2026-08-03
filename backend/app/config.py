@@ -37,11 +37,48 @@ class Settings(BaseSettings):
     fernwood_image_model: str = ""
     fernwood_vision_model: str = ""
 
+    # Every TEXT-ONLY generation (copy, voiceover script, text critique, and all
+    # five Campaign Brain lobes). Blank auto-probes, same as the other two.
+    #
+    # Kept as its own setting even though it currently resolves to the same
+    # model as vision, because the two have genuinely different requirements:
+    # this one only needs strict JSON, so it can be pointed at a cheaper or
+    # faster model without touching image critique, which needs to see.
+    #
+    # Benchmarked on a real brain prompt before choosing (scratchpad
+    # bench_models.py): gpt-5.4 9.8s honouring the strict schema with no
+    # filler; gpt-5.4-mini 5.6s and also clean; claude-sonnet-5 19.9s;
+    # gemini-3.5-flash returned unparseable JSON; kimi-k3-free took over two
+    # minutes per call and caps at 8 requests/minute, which is unusable for a
+    # five-lobe brain. gpt-5.4 wins on accuracy at acceptable latency, and
+    # matching the vision model keeps one verified model across the pipeline.
+    fernwood_text_model: str = ""
+
+    # Safety net for anyone pointing FERNWOOD_TEXT_MODEL at a free tier. Those
+    # carry hard request caps — kimi-k3-free allows 8 per minute and 429s
+    # immediately past it, while one campaign makes ~20 text calls. Requests to
+    # models named "*-free" are paced client-side; every other model calls
+    # straight through with no lock and no overhead. 7 leaves headroom, because
+    # the server's window and ours are not clock-synced.
+    fernwood_free_tier_rpm: int = 7
+    # Retries for a 429 that slipped through the pacing.
+    fernwood_rate_limit_retries: int = 3
+
+    # Per-request ceiling for text calls. 120s is generous for the resolved
+    # model (~10s observed) and leaves room for a slow gateway without letting
+    # a wedged request hold a campaign.
+    fernwood_text_request_timeout: float = 120.0
+
     # --- Video (TokenRouter async task API) ---
     # Verified live: MiniMax-Hailuo-2.3 image-to-video via `first_frame_image`,
     # NOT_START -> SUCCESS in ~115s at 6s/768P.
     fernwood_video_model: str = "MiniMax-Hailuo-2.3"
     fernwood_video_duration: int = 6
+    # Shots in the assembled advertisement. Each shot is its own generated
+    # frame + its own clip, so this is the main cost/length dial: 3 shots is a
+    # complete hook/product/benefit arc, 4 adds a dedicated closing shot.
+    # Clamped to 2-4 at the call site.
+    fernwood_ad_shots: int = 3
     fernwood_video_size: str = "768P"
     # Master switch; the brief's includeVideo flag still gates it per campaign.
     fernwood_enable_video: bool = True
@@ -82,6 +119,13 @@ class Settings(BaseSettings):
     b2_app_key: str = ""
 
     # --- Pipeline behaviour ---
+    # --- Campaign Brain ---
+    # Per-brand persistent memory: recalls laws learned from past rejections,
+    # aims the run, predicts its own score, simulates audience reaction, and
+    # writes back what it learned. Strictly additive — turning this off returns
+    # the pipeline to exactly its pre-brain behaviour.
+    fernwood_enable_brain: bool = True
+
     fernwood_max_attempts: int = 3
     fernwood_pass_threshold: int = 85
     # The retry loop is the product story. If every asset passes on attempt 1
@@ -126,4 +170,8 @@ class Resolved:
     image_model: str = ""
     vision_model: str = ""
     chat_model: str = ""
+    # Text-only workhorse (copy, voiceover script, text critique, Campaign
+    # Brain). Separate from chat_model, which must retain vision for image
+    # critique.
+    text_model: str = ""
     warnings: list[str] = []

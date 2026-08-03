@@ -191,7 +191,8 @@ def critique_asset(
         kind = "marketing copy" if asset_type == "copy" else "voiceover script"
         rubric = text_rubric(brief, attempt, kind, text_content or "")
         messages = _messages_for_text(rubric)
-        model = Resolved.chat_model
+        # Text critique is text-only, so it runs on the free Kimi tier too.
+        model = Resolved.text_model
 
     # Three-tier degradation: strict schema, then loose JSON mode, then plain.
     for response_format in (CRITIQUE_SCHEMA, {"type": "json_object"}, None):
@@ -221,7 +222,7 @@ def critique_asset(
                         "max_tokens": 1200,
                     },
                 )
-                .run(sink=make_sink(campaign_id), timeout=120, raise_on_failure=True)
+                .run(sink=make_sink(campaign_id), timeout=180, raise_on_failure=True)
             )
             parsed = loads_lenient(step_text(result.run.steps[0]))
             if parsed:
@@ -236,6 +237,7 @@ def critique_asset(
                     # retry loop is always visible, while keeping the model's real
                     # reasoning and fixes. Disable with
                     # FERNWOOD_FORCE_FIRST_RETRY=false.
+                    critique.pre_cap_score = critique.overall_score
                     critique.passed = False
                     critique.overall_score = min(critique.overall_score, 82)
                     critique.reasoning = (

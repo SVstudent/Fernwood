@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Campaign, PipelineStageLog, PipelineStageId, AssetType } from '../types';
+import { BrainSnapshot, Campaign, PipelineStageLog, PipelineStageId, AssetType } from '../types';
 import { 
   Sparkles, 
   CheckCircle2, 
@@ -18,6 +18,7 @@ import {
   Mic,
   FileText
 } from 'lucide-react';
+import { BrainCortex } from './BrainCortex';
 
 interface PipelineRunViewProps {
   campaign: Campaign | null;
@@ -26,6 +27,8 @@ interface PipelineRunViewProps {
   onTogglePause: () => void;
   onSkipStage?: () => void;
   onViewResult: () => void;
+  /** Live Campaign Brain state, streamed on its own SSE channel during the run. */
+  brain?: BrainSnapshot | null;
 }
 
 const STAGES: { id: PipelineStageId; label: string; icon: any }[] = [
@@ -42,7 +45,8 @@ export const PipelineRunView: React.FC<PipelineRunViewProps> = ({
   isPaused,
   onTogglePause,
   onSkipStage,
-  onViewResult
+  onViewResult,
+  brain
 }) => {
   const [activeTab, setActiveTab] = useState<'console' | 'inspector'>('console');
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -72,6 +76,11 @@ export const PipelineRunView: React.FC<PipelineRunViewProps> = ({
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 space-y-6">
+      {/* The Campaign Brain, live. Sits above the pipeline banner because its
+          first three lobes fire BEFORE any asset is generated — recall,
+          strategy and foresight are what the run is aimed with. */}
+      {brain && <BrainCortex snapshot={brain} />}
+
       {/* Top Banner & Controls */}
       <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

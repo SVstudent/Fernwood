@@ -82,6 +82,39 @@ class CritiqueResult(TSModel):
     criteria: list[CritiqueCriterion] = []
     reasoning: str
     suggested_fixes: str
+    # The score the model actually returned, before FERNWOOD_FORCE_FIRST_RETRY
+    # capped it to guarantee a visible retry. Present only when that cap fired.
+    # The Campaign Brain's improvement metric reads this in preference to
+    # overall_score — measuring learning against a number the demo harness chose
+    # would measure nothing.
+    pre_cap_score: int | None = None
+
+
+ShotRole = Literal["hook", "product", "benefit", "cta"]
+
+
+class AdShot(TSModel):
+    """One shot of the assembled advertisement.
+
+    A shot is NOT a re-crop of the key visual — it has its own generated first
+    frame, its own camera move and its own line of narration, so the finished
+    film cuts between real scenes the way an ad does rather than drifting across
+    a single still.
+    """
+
+    index: int
+    role: ShotRole
+    title: str
+    scene_prompt: str
+    motion_prompt: str
+    duration_seconds: int
+    voiceover_line: str = ""
+    # Populated as the shot is produced; absent shots are visible as gaps
+    # rather than silently dropped.
+    frame_url: str | None = None
+    clip_url: str | None = None
+    manifest_hash: str | None = None
+    status: Literal["pending", "rendered", "failed"] = "pending"
 
 
 class AttemptContent(TSModel):
@@ -97,8 +130,15 @@ class AttemptContent(TSModel):
     audio_url: str | None = None  # additive: real ElevenLabs mp3
     # video
     video_url: str | None = None
-    video_poster_url: str | None = None  # the approved key visual it animates
+    video_poster_url: str | None = None  # opening frame of the assembled ad
     video_duration_seconds: float | None = None
+    # The full shot breakdown of the assembled advertisement. Present when the
+    # film was cut from multiple generated scenes rather than being one still
+    # in motion.
+    ad_shots: list[AdShot] | None = None
+    shot_count: int | None = None
+    has_voiceover: bool | None = None
+    has_end_card: bool | None = None
     # copy
     headline: str | None = None
     subheadline: str | None = None
@@ -174,6 +214,13 @@ class Campaign(TSModel):
     retry_count: int = 0
     # asset_kind -> /api/media URL of the deliverable with its manifest embedded
     delivery: dict[str, str] = {}
+    # What this brand's Campaign Brain knew, decided and learned on this run.
+    # Held as an already-serialized dict (BrainSnapshot.ts()) rather than the
+    # model itself, for two reasons: it keeps app.domain free of an import from
+    # app.brain — the brain depends on the domain, never the reverse — and a
+    # nested model under an `Any` field would not inherit this model's
+    # by_alias=True dump, so it would reach the frontend in snake_case.
+    brain: dict[str, Any] | None = None
 
     def ts(self) -> dict[str, Any]:
         d = self.model_dump(by_alias=True, exclude_none=True)

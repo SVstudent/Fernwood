@@ -24,6 +24,7 @@ dependencies = [
     "genblaze-openai>=0.3.4,<0.4",
     "genblaze-elevenlabs>=0.3.3,<0.4",
     "genblaze-s3>=0.3.6,<0.4",
+    "imageio-ffmpeg>=0.6.0",
 ]
 
 [dependency-groups]

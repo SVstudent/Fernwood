@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Campaign } from '../types';
 import { AudioPlayerMock } from './AudioPlayerMock';
 import { ProvenanceLog } from './ProvenanceLog';
+import { StoryboardStrip } from './StoryboardStrip';
 import { 
   ShieldCheck, 
   Download, 
@@ -17,19 +18,22 @@ import {
   Maximize2, 
   Database,
   ArrowLeft,
-  FileText
+  FileText,
+  BrainCircuit
 } from 'lucide-react';
 
 interface CampaignResultViewProps {
   campaign: Campaign;
   onBackToLibrary: () => void;
   onReRunBrief: () => void;
+  onViewBrain?: () => void;
 }
 
 export const CampaignResultView: React.FC<CampaignResultViewProps> = ({
   campaign,
   onBackToLibrary,
-  onReRunBrief
+  onReRunBrief,
+  onViewBrain
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -44,6 +48,28 @@ export const CampaignResultView: React.FC<CampaignResultViewProps> = ({
   const approvedAudAttempt = audioAsset?.attempts.find(a => a.id === audioAsset.finalApprovedAttemptId) || audioAsset?.attempts[audioAsset.attempts.length - 1];
   const approvedCpyAttempt = copyAsset?.attempts.find(a => a.id === copyAsset.finalApprovedAttemptId) || copyAsset?.attempts[copyAsset.attempts.length - 1];
   const approvedVidAttempt = videoAsset?.attempts.find(a => a.id === videoAsset.finalApprovedAttemptId) || videoAsset?.attempts[videoAsset.attempts.length - 1];
+
+  /**
+   * The campaign's real critique verdict, derived from asset status.
+   *
+   * `status` is 'passed' only when an asset actually cleared the threshold —
+   * the backend deliberately refuses to mark a best-of-three "approved" when
+   * nothing passed. This surfaces that distinction instead of flattening it.
+   */
+  const verdict = React.useMemo(() => {
+    const present = [imageAsset, audioAsset, copyAsset, videoAsset].filter(
+      (a): a is NonNullable<typeof a> => Boolean(a)
+    );
+    const failed = present.filter((a) => a.status !== 'passed');
+    return {
+      total: present.length,
+      passedCount: present.length - failed.length,
+      allPassed: failed.length === 0 && present.length > 0,
+      failedNames: failed.map((a) => a.type),
+      // Mirrors FERNWOOD_PASS_THRESHOLD; shown so the badge explains itself.
+      threshold: 85,
+    };
+  }, [imageAsset, audioAsset, copyAsset, videoAsset]);
 
   const handleCopyText = (text: string, fieldName: string) => {
     navigator.clipboard.writeText(text);
@@ -118,6 +144,21 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
         </button>
 
         <div className="flex items-center gap-2">
+          {campaign.brain && onViewBrain && (
+            <button
+              onClick={onViewBrain}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-xs font-semibold text-violet-800 hover:bg-violet-100 transition-colors shadow-2xs"
+            >
+              <BrainCircuit className="h-3.5 w-3.5" />
+              <span>
+                Campaign Brain
+                {campaign.brain.audience
+                  ? ` · ${campaign.brain.audience.resonanceScore} resonance`
+                  : ''}
+              </span>
+            </button>
+          )}
+
           <button
             onClick={onReRunBrief}
             className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 transition-colors shadow-2xs"
@@ -141,10 +182,43 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-stone-100 pb-6">
           <div className="space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-900 border border-emerald-200">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-700" />
-                CRITIQUE VERDICT: PASSED
+              {/* Derived from the ASSETS, never hardcoded. This badge sits
+                  directly above a provenance log that lists every rejected
+                  attempt, so a fixed "PASSED" would contradict the evidence on
+                  the same screen — and honest reporting is the entire premise
+                  of the critique loop. An asset that never cleared the bar
+                  still ships its best attempt; that is a partial pass, not a
+                  pass. */}
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold border ${
+                  verdict.allPassed
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-200'
+                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                }`}
+                title={
+                  verdict.allPassed
+                    ? 'Every asset cleared the critique threshold.'
+                    : `Did not clear the threshold: ${verdict.failedNames.join(', ')}. ` +
+                      'The best-scoring attempt is delivered and every rejected attempt ' +
+                      'stays visible in the provenance log.'
+                }
+              >
+                <ShieldCheck
+                  className={`h-3.5 w-3.5 ${
+                    verdict.allPassed ? 'text-emerald-700' : 'text-amber-700'
+                  }`}
+                />
+                {verdict.allPassed
+                  ? 'CRITIQUE VERDICT: PASSED'
+                  : `CRITIQUE: ${verdict.passedCount}/${verdict.total} PASSED`}
               </span>
+
+              {!verdict.allPassed && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-medium text-stone-700 border border-stone-200">
+                  {verdict.failedNames.join(', ')} below the{' '}
+                  {verdict.threshold}-point bar — best attempt delivered
+                </span>
+              )}
               {campaign.toneTags.map((t, idx) => (
                 <span key={idx} className="rounded-md bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700 border border-stone-200">
                   {t}
@@ -203,11 +277,20 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
           <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div>
+                {/* "Approved" is a claim, so it has to be earned. When no
+                    attempt cleared the bar the best one is still delivered —
+                    but calling it approved would contradict the provenance log
+                    and the verdict badge above. */}
                 <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider font-mono">
-                  Approved Key Visual Poster
+                  {imageAsset?.status === 'passed'
+                    ? 'Approved Key Visual Poster'
+                    : 'Key Visual Poster · Best Attempt'}
                 </h3>
                 <p className="text-[11px] text-stone-600 font-mono">
                   Model: {approvedImgAttempt?.modelName || 'genblaze-image-v3'} (Attempt #{approvedImgAttempt?.attemptNumber})
+                  {imageAsset && imageAsset.status !== 'passed' && approvedImgAttempt
+                    ? ` · scored ${approvedImgAttempt.critique.overallScore}/100, below threshold`
+                    : ''}
                 </p>
               </div>
 
@@ -241,7 +324,7 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
             </div>
           </div>
 
-          {/* Approved Brand Film — animated from the approved key visual */}
+          {/* The assembled advertisement — a cut of independently generated shots */}
           {approvedVidAttempt?.content.videoUrl && (
             <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
               <div className="flex items-center justify-between pb-3 border-b border-stone-100">
@@ -251,7 +334,9 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
                   </div>
                   <div>
                     <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider font-mono">
-                      Approved Brand Film
+                      {(approvedVidAttempt.content.shotCount ?? 0) > 1
+                        ? `Approved Advertisement · ${approvedVidAttempt.content.shotCount} Shots`
+                        : 'Approved Brand Film'}
                     </h3>
                     <p className="text-[11px] text-stone-500 font-mono">
                       Model: {approvedVidAttempt.modelName}
@@ -276,10 +361,22 @@ ${campaign.delivery && Object.keys(campaign.delivery).length
               <div className="mt-3 pt-2 border-t border-dashed border-stone-200 text-[10px] text-stone-600 font-mono flex items-center gap-1.5">
                 <Sparkles className="h-3 w-3 text-amber-500" />
                 <span>
-                  Animated from the approved key visual · async provider
-                  (submit → poll → fetch) · streamed from Backblaze B2
+                  {(approvedVidAttempt.content.shotCount ?? 0) > 1
+                    ? `${approvedVidAttempt.content.shotCount} independently generated shots cut together` +
+                      (approvedVidAttempt.content.hasVoiceover ? ' · voiceover laid over the cut' : '') +
+                      (approvedVidAttempt.content.hasEndCard ? ' · branded end card' : '') +
+                      ' · async provider (submit → poll → fetch) · streamed from Backblaze B2'
+                    : 'Animated from the approved key visual · async provider (submit → poll → fetch) · streamed from Backblaze B2'}
                 </span>
               </div>
+
+              {/* The shot breakdown — evidence this is a cut, not one still in
+                  motion. Renders nothing when the film had no storyboard. */}
+              {(approvedVidAttempt.content.adShots?.length ?? 0) > 0 && (
+                <div className="mt-4">
+                  <StoryboardStrip content={approvedVidAttempt.content} />
+                </div>
+              )}
             </div>
           )}
 

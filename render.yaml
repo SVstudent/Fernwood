@@ -1,0 +1,66 @@
+# Render blueprint for the Fernwood backend.
+#
+# Render's free web-service tier is the pragmatic choice here: it builds from a
+# Dockerfile, gives a stable https hostname (needed so TokenRouter can fetch
+# presigned first frames), and does not require a card.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
+# Secrets are marked sync:false, so Render prompts for them instead of them
+# living in git.
+#
+# KNOWN FREE-TIER BEHAVIOUR: the instance sleeps after ~15 minutes with no
+# traffic and takes ~50s to wake. That is fine for judging — the Library loads
+# from B2 on the first request — but warm it up before a live demo.
+
+services:
+  - type: web
+    name: fernwood-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+
+    envVars:
+      # --- storage -----------------------------------------------------
+      # MUST be b2. The container filesystem is ephemeral, so local storage
+      # would lose every campaign AND every brain on each redeploy — which
+      # would quietly disable the learning the whole product is built on.
+      - key: FERNWOOD_STORAGE
+        value: b2
+      - key: B2_BUCKET
+        value: fernwood-campaigns
+      - key: B2_REGION
+        value: us-west-004
+      - key: B2_KEY_ID
+        sync: false
+      - key: B2_APP_KEY
+        sync: false
+
+      # --- inference ---------------------------------------------------
+      - key: TOKENROUTER_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+
+      # --- CORS --------------------------------------------------------
+      # Your Vercel production domain. Without this the browser blocks every
+      # call, including the SSE stream — which looks like a run that starts
+      # and then goes silent. Preview deploys are covered by regex in main.py.
+      - key: FERNWOOD_ALLOWED_ORIGINS
+        sync: false
+
+      # --- pipeline ----------------------------------------------------
+      - key: FERNWOOD_ENABLE_BRAIN
+        value: "true"
+      - key: FERNWOOD_ENABLE_VIDEO
+        value: "true"
+      - key: FERNWOOD_AD_SHOTS
+        value: "3"
+      - key: FERNWOOD_PASS_THRESHOLD
+        value: "85"
+      - key: FERNWOOD_FORCE_FIRST_RETRY
+        value: "true"

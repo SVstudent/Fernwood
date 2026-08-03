@@ -52,8 +52,30 @@ CHAT_CANDIDATES = [
     "anthropic/claude-sonnet-5",
 ]
 
-# Models that reject the `temperature` parameter ("deprecated for this model").
-NO_TEMPERATURE_PREFIXES = ("anthropic/",)
+# Text-only work: marketing copy, voiceover scripts, text critique, and every
+# Campaign Brain lobe. Benchmarked on a real Campaign Brain prompt rather than
+# chosen by reputation or price:
+#   openai/gpt-5.4          9.8s, honoured the strict schema, no filler. <-- winner
+#   openai/gpt-5.4-mini     5.6s and also clean; the faster fallback.
+#   anthropic/claude-*     ~20s, correct but the slowest passing option, and it
+#                           rejects `temperature` (see NO_TEMPERATURE_PREFIXES).
+# Deliberately NOT here: google/gemini-3.5-flash returned unparseable JSON, and
+# moonshotai/kimi-k3-free took over two minutes per call against an 8-per-minute
+# cap — a five-lobe brain cannot run on that.
+TEXT_CANDIDATES = [
+    "openai/gpt-5.4",
+    "openai/gpt-5.4-mini",
+    "anthropic/claude-opus-5",
+    "anthropic/claude-sonnet-5",
+]
+
+# Models that reject the `temperature` parameter outright with HTTP 400.
+# anthropic/*: "`temperature` is deprecated for this model".
+# moonshotai/*: "invalid temperature: only 1 is allowed for this model" —
+# observed while benchmarking, and it fails EVERY call, so pinning
+# FERNWOOD_TEXT_MODEL to a Kimi without this entry would 400 the whole text
+# path rather than degrade.
+NO_TEMPERATURE_PREFIXES = ("anthropic/", "moonshotai/")
 
 
 @lru_cache(maxsize=1)
@@ -66,6 +88,34 @@ def tokenrouter_client() -> OpenAI:
         base_url=s.tokenrouter_base_url,
         timeout=120.0,
         max_retries=2,
+    )
+
+
+@lru_cache(maxsize=1)
+def tokenrouter_chat_client() -> OpenAI:
+    """Client for chat/LLM steps, with SDK retries capped at ONE.
+
+    The default of 2 is too many here, because every chat call already sits
+    under two retry layers we control: `_call_with_pacing` retries 429s with
+    backoff, and the callers (brain/llm.py, pipeline/critique.py) each walk a
+    response_format ladder on failure. Those compose multiplicatively — with
+    SDK retries at 2 and a model that was merely slow rather than failing, one
+    Campaign Brain lobe was measured occupying many minutes before reporting
+    anything at all.
+
+    One retry keeps genuine transient resilience (a dropped connection) without
+    turning a slow response into a silent multi-minute stall.
+    """
+    s = get_settings()
+    if not s.has_tokenrouter:
+        raise RuntimeError("TOKENROUTER_API_KEY is not set.")
+    return OpenAI(
+        api_key=s.tokenrouter_api_key,
+        base_url=s.tokenrouter_base_url,
+        # Headroom over the per-request timeout so the deadline that fires is
+        # the one the caller chose, with a message naming what it was doing.
+        timeout=s.fernwood_text_request_timeout + 30.0,
+        max_retries=1,
     )
 
 
@@ -90,6 +140,30 @@ def _pick(candidates: list[str], available: set[str], override: str) -> tuple[st
     return candidates[0], (
         f"none of {candidates} present in /v1/models; defaulting to {candidates[0]}"
     )
+
+
+def _pick_text(available: set[str], configured: str) -> tuple[str, str | None]:
+    """Resolve the text-only model, preferring the configured one.
+
+    Unlike _pick(), a configured value is NOT taken on faith: FERNWOOD_TEXT_MODEL
+    ships with a real default (the free Kimi tier), and a free tier can be
+    withdrawn from the catalog at any time. So the configured id is treated as
+    the head of the candidate list and still has to be present — otherwise a
+    vanished free tier would 404 every copy, script and brain call at demo time.
+    """
+    configured = configured.strip()
+    order = [configured, *TEXT_CANDIDATES] if configured else list(TEXT_CANDIDATES)
+    if not available:
+        return order[0], f"model list unavailable; defaulting text model to {order[0]}"
+    for candidate in order:
+        if candidate in available:
+            warning = (
+                None
+                if candidate == order[0]
+                else f"text model {order[0]} not in /v1/models; using {candidate}"
+            )
+            return candidate, warning
+    return order[0], f"none of {order} present in /v1/models; defaulting to {order[0]}"
 
 
 def _returns_usable_json(model: str) -> bool:
@@ -133,6 +207,7 @@ def probe_models() -> None:
         Resolved.image_model = s.fernwood_image_model or IMAGE_CANDIDATES[0]
         Resolved.vision_model = s.fernwood_vision_model or VISION_CANDIDATES[0]
         Resolved.chat_model = CHAT_CANDIDATES[0]
+        Resolved.text_model = s.fernwood_text_model or TEXT_CANDIDATES[0]
         return
 
     available = _available_model_ids()
@@ -140,7 +215,8 @@ def probe_models() -> None:
     Resolved.image_model, w1 = _pick(IMAGE_CANDIDATES, available, s.fernwood_image_model)
     Resolved.vision_model, w2 = _pick(VISION_CANDIDATES, available, s.fernwood_vision_model)
     Resolved.chat_model, w3 = _pick(CHAT_CANDIDATES, available, "")
-    Resolved.warnings.extend(w for w in (w1, w2, w3) if w)
+    Resolved.text_model, w4 = _pick_text(available, s.fernwood_text_model)
+    Resolved.warnings.extend(w for w in (w1, w2, w3, w4) if w)
 
     # Live-fire check of the resolved chat model. Cheap (one ~200 token call)
     # and it catches the silent-empty-response failure mode before a demo.
@@ -161,15 +237,29 @@ def probe_models() -> None:
                 "critiques may degrade to heuristic verdicts."
             )
 
+    # Live-fire the text model too. It carries copy, voiceover scripts, text
+    # critique AND all five brain lobes, and it is a FREE tier — the failure
+    # mode we actually have to survive is the free tier being throttled or
+    # withdrawn on demo day, which a catalog listing alone will not reveal.
+    if Resolved.text_model != Resolved.chat_model and not _returns_usable_json(
+        Resolved.text_model
+    ):
+        Resolved.warnings.append(
+            f"text model {Resolved.text_model} returned unusable output; "
+            f"falling back to {Resolved.chat_model} for copy, scripts and the Campaign Brain."
+        )
+        Resolved.text_model = Resolved.chat_model
+
     if s.fernwood_tts_provider.lower() == "elevenlabs" and not s.has_elevenlabs:
         Resolved.warnings.append(
             "FERNWOOD_TTS_PROVIDER=elevenlabs but ELEVENLABS_API_KEY is unset."
         )
 
     logger.info(
-        "Resolved models: image=%s vision=%s chat=%s (catalog=%d models)",
+        "Resolved models: image=%s vision=%s chat=%s text=%s (catalog=%d models)",
         Resolved.image_model,
         Resolved.vision_model,
         Resolved.chat_model,
+        Resolved.text_model,
         len(available),
     )

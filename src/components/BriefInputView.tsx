@@ -80,7 +80,12 @@ const PRESET_TEMPLATES = [
   }
 ];
 
-const VIDEO_SECONDS = 6;
+// Mirrors FERNWOOD_AD_SHOTS x FERNWOOD_VIDEO_DURATION on the backend, plus the
+// ~2.5s end card. Shown so the opt-in states the real runtime rather than the
+// per-shot length.
+const AD_SHOTS = 3;
+const SHOT_SECONDS = 6;
+const AD_SECONDS = AD_SHOTS * SHOT_SECONDS + 3;
 
 export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief }) => {
   const [brandName, setBrandName] = useState('Fernwood Goods');
@@ -306,8 +311,8 @@ export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief })
           </div>
         </div>
 
-        {/* Brand film opt-in — off by default: video adds ~2 minutes and real
-            provider quota per campaign. */}
+        {/* Advertisement opt-in — off by default: it costs a generated frame
+            AND a generated clip per shot, plus real provider quota. */}
         <label className="flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-5 cursor-pointer hover:border-stone-300 transition-colors">
           <input
             type="checkbox"
@@ -317,12 +322,14 @@ export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief })
           />
           <span>
             <span className="block text-sm font-bold text-stone-900 font-sans">
-              Also generate a brand film
+              Also produce a full advertisement
             </span>
             <span className="block text-xs text-stone-600 font-sans mt-0.5">
-              Animates the <em>approved</em> key visual into a {' '}
-              {VIDEO_SECONDS}s cinematic spot via an asynchronous video pipeline.
-              Adds roughly two minutes to the run.
+              Writes a storyboard, then generates {AD_SHOTS} <em>distinct scenes</em> —
+              hook, product, benefit — each with its own first frame and camera
+              move. Cuts them together into a ~{AD_SECONDS}s commercial with the
+              approved voiceover laid over it and a branded end card. Shots render
+              in parallel; adds roughly three minutes to the run.
             </span>
           </span>
         </label>
@@ -335,7 +342,7 @@ export const BriefInputView: React.FC<BriefInputViewProps> = ({ onSubmitBrief })
               Ready to Run AI Critique Pipeline?
             </h3>
             <p className="text-xs text-stone-300 font-sans mt-0.5">
-              Generates Image, Audio{includeVideo ? ', Brand Film' : ''}, and Copy with
+              Generates Image, Audio{includeVideo ? `, a ${AD_SHOTS}-shot Advertisement` : ''}, and Copy with
               self-critique scoring and automatic retries.
             </p>
           </div>
