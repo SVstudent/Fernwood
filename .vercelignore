@@ -1,0 +1,24 @@
+# The Python backend does NOT belong on Vercel.
+#
+# Vercel's CLI auto-detects backend/pyproject.toml as a FastAPI service and
+# tries to deploy it as serverless functions. That cannot work here:
+#
+#   * a campaign runs for ~8 minutes in a worker thread — far past any
+#     serverless execution limit
+#   * progress is streamed over a long-lived SSE connection
+#   * the run registry is in-process, so it needs one persistent process,
+#     not per-request isolates
+#
+# The backend is deployed separately from backend/Dockerfile (see DEPLOY.md).
+# Excluding it here also keeps the frontend upload small.
+backend/
+
+# Never ship local artefacts or secrets
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.pytest_cache/
+**/__pycache__/
+*.pyc

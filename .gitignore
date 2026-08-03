@@ -13,3 +13,4 @@ backend/var/
 backend/__pycache__/
 **/__pycache__/
 *.pyc
+.vercel

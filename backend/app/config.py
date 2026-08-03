@@ -133,6 +133,14 @@ class Settings(BaseSettings):
     # while keeping the model's real reasoning/suggestedFixes text.
     fernwood_force_first_retry: bool = True
 
+    # Extra browser origins allowed to call this API, comma-separated. Required
+    # once the frontend is deployed: it then calls the backend cross-origin, and
+    # without its exact origin here every request fails CORS — including the SSE
+    # stream, which surfaces as a run that starts and then goes silent.
+    # Vercel PREVIEW deployments get a new hostname per commit, so main.py also
+    # allows *.vercel.app by regex rather than needing this updated every push.
+    fernwood_allowed_origins: str = ""
+
     # Port 8787, not 8000: :8000 is commonly occupied by other local services.
     # Only used to build LocalDiskBackend durable URLs, which public_media_url()
     # immediately rewrites to relative /api/media/... paths — so stored
